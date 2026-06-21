@@ -1,0 +1,245 @@
+{
+  "info": {
+    "name": "Air Charters - Paystack Integration",
+    "description": "Test collection for Paystack payment integration in Air Charters app",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000",
+      "type": "string"
+    },
+    {
+      "key": "authToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "bookingId",
+      "value": "test_booking_123",
+      "type": "string"
+    },
+    {
+      "key": "companyId",
+      "value": "11",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "test_user_456",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Get Paystack Info",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/payments/paystack/info",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "payments", "paystack", "info"]
+        },
+        "description": "Get Paystack public key and supported currencies/methods"
+      },
+      "response": []
+    },
+    {
+      "name": "2. Initialize Paystack Payment (KES)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{authToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 100.00,\n  \"currency\": \"KES\",\n  \"email\": \"test@example.com\",\n  \"bookingId\": \"{{bookingId}}\",\n  \"companyId\": {{companyId}},\n  \"userId\": \"{{userId}}\",\n  \"description\": \"Test payment for charter flight\",\n  \"metadata\": {\n    \"test\": true,\n    \"source\": \"postman_test\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/payments/paystack/initialize",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "payments", "paystack", "initialize"]
+        },
+        "description": "Initialize a Paystack payment for KES currency"
+      },
+      "response": []
+    },
+    {
+      "name": "3. Initialize Paystack Payment (USD)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{authToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 50.00,\n  \"currency\": \"USD\",\n  \"email\": \"test@example.com\",\n  \"bookingId\": \"{{bookingId}}_usd\",\n  \"companyId\": {{companyId}},\n  \"userId\": \"{{userId}}\",\n  \"description\": \"Test payment for charter flight (USD)\",\n  \"metadata\": {\n    \"test\": true,\n    \"source\": \"postman_test\",\n    \"currency\": \"USD\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/payments/paystack/initialize",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "payments", "paystack", "initialize"]
+        },
+        "description": "Initialize a Paystack payment for USD currency (may fail if not supported)"
+      },
+      "response": []
+    },
+    {
+      "name": "4. Initialize Paystack Payment (NGN)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{authToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 5000.00,\n  \"currency\": \"NGN\",\n  \"email\": \"test@example.com\",\n  \"bookingId\": \"{{bookingId}}_ngn\",\n  \"companyId\": {{companyId}},\n  \"userId\": \"{{userId}}\",\n  \"description\": \"Test payment for charter flight (NGN)\",\n  \"metadata\": {\n    \"test\": true,\n    \"source\": \"postman_test\",\n    \"currency\": \"NGN\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/payments/paystack/initialize",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "payments", "paystack", "initialize"]
+        },
+        "description": "Initialize a Paystack payment for NGN currency (may fail if not supported)"
+      },
+      "response": []
+    },
+    {
+      "name": "5. Verify Payment (Mock Reference)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{authToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/payments/paystack/verify/PAYSTACK_TEST_REFERENCE_123",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "payments", "paystack", "verify", "PAYSTACK_TEST_REFERENCE_123"]
+        },
+        "description": "Verify a payment using a mock reference (will fail with real reference)"
+      },
+      "response": []
+    },
+    {
+      "name": "6. Test Webhook (Mock)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-paystack-signature",
+            "value": "mock_signature_for_testing"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"event\": \"charge.success\",\n  \"data\": {\n    \"id\": 123456789,\n    \"domain\": \"test\",\n    \"status\": \"success\",\n    \"reference\": \"PAYSTACK_TEST_REFERENCE_123\",\n    \"amount\": 10000,\n    \"currency\": \"KES\",\n    \"customer\": {\n      \"id\": 12345,\n      \"email\": \"test@example.com\",\n      \"phone\": \"+254700000000\"\n    },\n    \"metadata\": {\n      \"bookingId\": \"{{bookingId}}\",\n      \"companyId\": \"{{companyId}}\",\n      \"userId\": \"{{userId}}\"\n    },\n    \"gateway_response\": \"Successful\",\n    \"paid_at\": \"2025-01-15T12:00:00.000Z\",\n    \"created_at\": \"2025-01-15T12:00:00.000Z\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/payments/paystack/webhook",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "payments", "paystack", "webhook"]
+        },
+        "description": "Test webhook endpoint with mock Paystack webhook data"
+      },
+      "response": []
+    },
+    {
+      "name": "7. Create Subaccount (Mock)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{authToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"companyId\": {{companyId}},\n  \"businessName\": \"Test Airline Company\",\n  \"settlementBank\": \"Absa Bank Kenya Plc\",\n  \"accountNumber\": \"1234567890\",\n  \"percentageCharge\": 5.0,\n  \"description\": \"Test subaccount creation\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/payments/paystack/subaccount",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "payments", "paystack", "subaccount"]
+        },
+        "description": "Create a new Paystack subaccount (mock implementation)"
+      },
+      "response": []
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Auto-generate test data",
+          "pm.globals.set('timestamp', Date.now());",
+          "pm.globals.set('randomId', Math.random().toString(36).substring(2, 8));"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Common test scripts",
+          "pm.test('Response time is less than 5000ms', function () {",
+          "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+          "});",
+          "",
+          "pm.test('Response has valid JSON', function () {",
+          "    pm.response.to.have.jsonBody();",
+          "});",
+          "",
+          "// Log response for debugging",
+          "console.log('Response:', pm.response.json());"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,742 @@
+{
+  "info": {
+    "name": "Air Charters Payment System Tests",
+    "description": "Comprehensive test collection for payment system endpoints",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:5000",
+      "type": "string"
+    },
+    {
+      "key": "jwt_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "test_user_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "test_booking_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "test_payment_intent_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "test_transaction_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{jwt_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "1. Authentication Setup",
+      "item": [
+        {
+          "name": "Register Test User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"payment-test@example.com\",\n  \"password\": \"TestPassword123!\",\n  \"firstName\": \"Payment\",\n  \"lastName\": \"Tester\",\n  \"authProvider\": \"email\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "register"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('jwt_token', pm.response.json().accessToken);",
+                  "    pm.collectionVariables.set('test_user_id', pm.response.json().user.id);",
+                  "    console.log('Test user registered and token set');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login Test User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"payment-test@example.com\",\n  \"password\": \"TestPassword123!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    pm.collectionVariables.set('jwt_token', pm.response.json().accessToken);",
+                  "    console.log('User logged in and token updated');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Create Test Booking",
+      "item": [
+        {
+          "name": "Create Booking for Payment Testing",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dealId\": 1,\n  \"totalPrice\": 1500.00,\n  \"onboardDining\": true,\n  \"groundTransportation\": false,\n  \"specialRequirements\": \"Test booking for payment system\",\n  \"billingRegion\": \"US\",\n  \"paymentMethod\": \"card\",\n  \"passengers\": [\n    {\n      \"firstName\": \"John\",\n      \"lastName\": \"Doe\",\n      \"age\": 35,\n      \"nationality\": \"US\",\n      \"idPassportNumber\": \"US123456789\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/bookings",
+              "host": ["{{base_url}}"],
+              "path": ["api", "bookings"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('test_booking_id', pm.response.json().data.id);",
+                  "    console.log('Test booking created:', pm.response.json().data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Payment Provider Tests",
+      "item": [
+        {
+          "name": "Get Available Payment Providers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/payments/providers",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "providers"]
+            }
+          }
+        },
+        {
+          "name": "Create Stripe Payment Intent",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bookingId\": \"{{test_booking_id}}\",\n  \"amount\": 1500.00,\n  \"currency\": \"USD\",\n  \"paymentMethod\": \"card\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/payments/create-intent",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "create-intent"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('test_payment_intent_id', pm.response.json().data.paymentIntentId);",
+                  "    console.log('Payment intent created:', pm.response.json().data.paymentIntentId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create M-Pesa STK Push",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bookingId\": \"{{test_booking_id}}\",\n  \"amount\": 150000,\n  \"phoneNumber\": \"254700000000\",\n  \"description\": \"Test M-Pesa payment\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/payments/mpesa/stk-push",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "mpesa", "stk-push"]
+            }
+          }
+        },
+        {
+          "name": "Get Payment Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/payments/status/{{test_payment_intent_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "status", "{{test_payment_intent_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Confirm Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentIntentId\": \"{{test_payment_intent_id}}\",\n  \"paymentMethodId\": \"pm_test_123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/payments/confirm",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "confirm"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Unified Payment System Tests",
+      "item": [
+        {
+          "name": "Process Unified Payment (Card)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": {{test_user_id}},\n  \"companyId\": 1,\n  \"bookingId\": \"{{test_booking_id}}\",\n  \"amount\": 1500.00,\n  \"currency\": \"USD\",\n  \"paymentMethod\": \"card\",\n  \"description\": \"Test unified payment with card\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/unified-payments/process",
+              "host": ["{{base_url}}"],
+              "path": ["api", "unified-payments", "process"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('test_transaction_id', pm.response.json().data.transactionId);",
+                  "    console.log('Unified payment processed:', pm.response.json().data.transactionId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Process Unified Payment (M-Pesa)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": {{test_user_id}},\n  \"companyId\": 1,\n  \"bookingId\": \"{{test_booking_id}}\",\n  \"amount\": 150000,\n  \"currency\": \"KES\",\n  \"paymentMethod\": \"mpesa\",\n  \"description\": \"Test unified payment with M-Pesa\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/unified-payments/process",
+              "host": ["{{base_url}}"],
+              "path": ["api", "unified-payments", "process"]
+            }
+          }
+        },
+        {
+          "name": "Get Transaction Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/unified-payments/transaction/{{test_transaction_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "unified-payments", "transaction", "{{test_transaction_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Confirm Unified Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentMethodId\": \"pm_test_123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/unified-payments/confirm/{{test_transaction_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "unified-payments", "confirm", "{{test_transaction_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Get Company Transactions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/unified-payments/company/1/transactions",
+              "host": ["{{base_url}}"],
+              "path": ["api", "unified-payments", "company", "1", "transactions"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Legacy Payment System Tests",
+      "item": [
+        {
+          "name": "Create Legacy Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bookingId\": \"{{test_booking_id}}\",\n  \"paymentMethod\": \"card\",\n  \"totalAmount\": 1500.00,\n  \"platformFee\": 75.00,\n  \"currency\": \"USD\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/payments",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments"]
+            }
+          }
+        },
+        {
+          "name": "Get User Payments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/payments",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments"]
+            }
+          }
+        },
+        {
+          "name": "Get Booking Payments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/payments/booking/{{test_booking_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "booking", "{{test_booking_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Update Payment Status",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"completed\",\n  \"transactionId\": \"test-transaction-123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/payments/{{test_payment_intent_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "{{test_payment_intent_id}}", "status"]
+            }
+          }
+        },
+        {
+          "name": "Get Payment Statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/payments/stats",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "stats"]
+            }
+          }
+        },
+        {
+          "name": "Get Company Payment Statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/payments/stats?companyId=1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "stats"],
+              "query": [
+                {
+                  "key": "companyId",
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Refund Processing Tests",
+      "item": [
+        {
+          "name": "Create Refund",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 500.00,\n  \"reason\": \"Customer request\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/payments/refund/{{test_payment_intent_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "refund", "{{test_payment_intent_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Webhook Tests",
+      "item": [
+        {
+          "name": "M-Pesa Callback (Success)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"Body\": {\n    \"stkCallback\": {\n      \"MerchantRequestID\": \"test-merchant-request-id\",\n      \"CheckoutRequestID\": \"test-checkout-request-id\",\n      \"ResultCode\": 0,\n      \"ResultDesc\": \"Success\",\n      \"CallbackMetadata\": {\n        \"Item\": [\n          { \"Name\": \"Amount\", \"Value\": 150000 },\n          { \"Name\": \"MpesaReceiptNumber\", \"Value\": \"test-receipt-123\" },\n          { \"Name\": \"TransactionDate\", \"Value\": \"20250115143022\" },\n          { \"Name\": \"PhoneNumber\", \"Value\": \"254700000000\" }\n        ]\n      }\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/mpesa-callbacks/callback",
+              "host": ["{{base_url}}"],
+              "path": ["api", "mpesa-callbacks", "callback"]
+            }
+          }
+        },
+        {
+          "name": "M-Pesa Callback (Failed)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"Body\": {\n    \"stkCallback\": {\n      \"MerchantRequestID\": \"test-merchant-request-id\",\n      \"CheckoutRequestID\": \"test-checkout-request-id\",\n      \"ResultCode\": 1,\n      \"ResultDesc\": \"Failed\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/mpesa-callbacks/callback",
+              "host": ["{{base_url}}"],
+              "path": ["api", "mpesa-callbacks", "callback"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Error Handling Tests",
+      "item": [
+        {
+          "name": "Invalid Amount (Negative)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bookingId\": \"{{test_booking_id}}\",\n  \"amount\": -100,\n  \"currency\": \"USD\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/payments/create-intent",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "create-intent"]
+            }
+          }
+        },
+        {
+          "name": "Invalid Currency",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bookingId\": \"{{test_booking_id}}\",\n  \"amount\": 1500.00,\n  \"currency\": \"INVALID\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/payments/create-intent",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "create-intent"]
+            }
+          }
+        },
+        {
+          "name": "Missing Booking ID",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 1500.00,\n  \"currency\": \"USD\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/payments/create-intent",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "create-intent"]
+            }
+          }
+        },
+        {
+          "name": "Non-existent Booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bookingId\": \"non-existent-booking\",\n  \"amount\": 1500.00,\n  \"currency\": \"USD\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/payments/create-intent",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "create-intent"]
+            }
+          }
+        },
+        {
+          "name": "Invalid Phone Number (M-Pesa)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bookingId\": \"{{test_booking_id}}\",\n  \"amount\": 150000,\n  \"phoneNumber\": \"invalid-phone\",\n  \"description\": \"Test M-Pesa payment\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/payments/mpesa/stk-push",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "mpesa", "stk-push"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Authentication Error Tests",
+      "item": [
+        {
+          "name": "No Authentication",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/payments/providers",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "providers"]
+            }
+          }
+        },
+        {
+          "name": "Invalid Token",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer invalid-token"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/payments/providers",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "providers"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Integration Tests",
+      "item": [
+        {
+          "name": "Complete Payment Flow (Stripe)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": {{test_user_id}},\n  \"companyId\": 1,\n  \"bookingId\": \"{{test_booking_id}}\",\n  \"amount\": 2000.00,\n  \"currency\": \"USD\",\n  \"paymentMethod\": \"card\",\n  \"description\": \"Complete payment flow test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/unified-payments/process",
+              "host": ["{{base_url}}"],
+              "path": ["api", "unified-payments", "process"]
+            }
+          }
+        },
+        {
+          "name": "Complete Payment Flow (M-Pesa)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": {{test_user_id}},\n  \"companyId\": 1,\n  \"bookingId\": \"{{test_booking_id}}\",\n  \"amount\": 200000,\n  \"currency\": \"KES\",\n  \"paymentMethod\": \"mpesa\",\n  \"description\": \"Complete M-Pesa payment flow test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/unified-payments/process",
+              "host": ["{{base_url}}"],
+              "path": ["api", "unified-payments", "process"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

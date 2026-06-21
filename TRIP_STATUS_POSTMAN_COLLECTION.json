@@ -1,0 +1,297 @@
+{
+  "info": {
+    "name": "Trip Status API Tests",
+    "description": "Test collection for the new trip status endpoints",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{auth_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:5000/api",
+      "type": "string"
+    },
+    {
+      "key": "auth_token",
+      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyXzE3NTIwOTMyOTQ0NjhfNWx1ZzNqdDJwIiwiZW1haWwiOiJiZW5uamlva3dhbWFAZ21haWwuY29tIiwicGhvbmUiOiIrMjU0NzAxMTEyMjMzIiwidHlwZSI6ImJhY2tlbmQiLCJpYXQiOjE3NTc2NzQ5OTYsImV4cCI6MTc1NzY3ODU5Nn0.SyJiFJ9028s09EvYNzYByGbZAuE7dadpysLntywb80I",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"bennjiokwama@gmail.com\",\n  \"password\": \"your_password_here\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.accessToken) {",
+                  "        pm.collectionVariables.set('auth_token', response.accessToken);",
+                  "        console.log('Auth token set:', response.accessToken.substring(0, 20) + '...');",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Trip Status Endpoints",
+      "item": [
+        {
+          "name": "Get All Trips",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/trips",
+              "host": ["{{base_url}}"],
+              "path": ["trips"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has success field', function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response).to.have.property('success', true);",
+                  "});",
+                  "",
+                  "pm.test('Response has data array', function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response).to.have.property('data');",
+                  "    pm.expect(response.data).to.be.an('array');",
+                  "});",
+                  "",
+                  "pm.test('All trips have required fields', function () {",
+                  "    const response = pm.response.json();",
+                  "    response.data.forEach(trip => {",
+                  "        pm.expect(trip).to.have.property('id');",
+                  "        pm.expect(trip).to.have.property('status');",
+                  "        pm.expect(trip).to.have.property('bookingId');",
+                  "        pm.expect(['pending', 'upcoming', 'completed', 'cancelled']).to.include(trip.status);",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Pending Trips",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/trips/pending",
+              "host": ["{{base_url}}"],
+              "path": ["trips", "pending"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('All trips are pending', function () {",
+                  "    const response = pm.response.json();",
+                  "    response.data.forEach(trip => {",
+                  "        pm.expect(trip.status).to.equal('pending');",
+                  "    });",
+                  "});",
+                  "",
+                  "pm.test('Pending trips have booking data', function () {",
+                  "    const response = pm.response.json();",
+                  "    response.data.forEach(trip => {",
+                  "        pm.expect(trip).to.have.property('booking');",
+                  "        pm.expect(trip.booking).to.have.property('paymentStatus', 'pending');",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Upcoming Trips",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/trips/status/upcoming",
+              "host": ["{{base_url}}"],
+              "path": ["trips", "status", "upcoming"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('All trips are upcoming', function () {",
+                  "    const response = pm.response.json();",
+                  "    response.data.forEach(trip => {",
+                  "        pm.expect(trip.status).to.equal('upcoming');",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Completed Trips",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/trips/status/completed",
+              "host": ["{{base_url}}"],
+              "path": ["trips", "status", "completed"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('All trips are completed', function () {",
+                  "    const response = pm.response.json();",
+                  "    response.data.forEach(trip => {",
+                  "        pm.expect(trip.status).to.equal('completed');",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Cancelled Trips",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/trips/status/cancelled",
+              "host": ["{{base_url}}"],
+              "path": ["trips", "status", "cancelled"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('All trips are cancelled', function () {",
+                  "    const response = pm.response.json();",
+                  "    response.data.forEach(trip => {",
+                  "        pm.expect(trip.status).to.equal('cancelled');",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Trip Statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/trips/stats/overview",
+              "host": ["{{base_url}}"],
+              "path": ["trips", "stats", "overview"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Statistics have required fields', function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.data).to.have.property('total');",
+                  "    pm.expect(response.data).to.have.property('upcoming');",
+                  "    pm.expect(response.data).to.have.property('completed');",
+                  "    pm.expect(response.data).to.have.property('cancelled');",
+                  "    pm.expect(response.data).to.have.property('averageRating');",
+                  "});",
+                  "",
+                  "pm.test('Statistics are numbers', function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.data.total).to.be.a('number');",
+                  "    pm.expect(response.data.upcoming).to.be.a('number');",
+                  "    pm.expect(response.data.completed).to.be.a('number');",
+                  "    pm.expect(response.data.cancelled).to.be.a('number');",
+                  "    pm.expect(response.data.averageRating).to.be.a('number');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
