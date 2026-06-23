@@ -64,6 +64,17 @@ export class Aircraft {
   @Column({ name: 'aircraftTypeImagePlaceholderId', type: 'int', nullable: true })
   aircraftTypeImagePlaceholderId: number;
 
+  @Column({
+    name: 'serviceType',
+    type: 'enum',
+    enum: ['cargo', 'medical'],
+    nullable: true,
+  })
+  serviceType: string | null;
+
+  @Column({ name: 'maxLuggageCapacity', type: 'int', nullable: true })
+  maxLuggageCapacity: number | null;
+
   @CreateDateColumn({ name: 'createdAt' })
   createdAt: Date;
 

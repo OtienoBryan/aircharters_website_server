@@ -3,10 +3,15 @@ import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
+import * as compression from 'compression';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
+
+  // Gzip/Brotli-negotiated response compression - cuts JSON payload size
+  // (and therefore transfer time) for list endpoints like /charter-deals.
+  app.use(compression());
 
   // Enable CORS - Allow all origins
   app.enableCors({

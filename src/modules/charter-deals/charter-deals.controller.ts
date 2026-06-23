@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Param, UseGuards, Header } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { CharterDealsService } from './charter-deals.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -69,6 +69,9 @@ export class CharterDealsController {
   @ApiQuery({ name: 'userLat', required: false, type: Number, description: 'User latitude for proximity sorting' })
   @ApiQuery({ name: 'userLng', required: false, type: Number, description: 'User longitude for proximity sorting' })
   @ApiQuery({ name: 'groupBy', required: false, type: Boolean, description: 'Group by aircraft type and route' })
+  // Matches CharterDealsService's in-process LIST_CACHE_TTL_MS, so browsers/CDNs
+  // skip the round trip entirely for repeat requests within the same window.
+  @Header('Cache-Control', 'public, max-age=30')
   async getCharterDeals(
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '10',
