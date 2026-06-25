@@ -57,6 +57,7 @@ import { CompanyPaymentAccount } from './common/entities/company-payment-account
 import { TransactionLedger } from './common/entities/transaction-ledger.entity';
 import { ExperienceTemplate } from './common/entities/experience-template.entity';
 import { ExperienceImage } from './common/entities/experience-image.entity';
+import { ExperienceSchedule } from './common/entities/experience-schedule.entity';
 
 @Module({
   imports: [
@@ -112,6 +113,7 @@ import { ExperienceImage } from './common/entities/experience-image.entity';
             TransactionLedger,
             ExperienceTemplate,
             ExperienceImage,
+            ExperienceSchedule,
           ],
           synchronize: false,
           logging: false,

@@ -87,6 +87,11 @@ export class AircraftService {
     return result;
   }
 
+  async findById(id: number): Promise<AircraftListItem | null> {
+    const result = await this.fetchAll({ id, onlyAvailable: false });
+    return result[0] || null;
+  }
+
   async findByServiceType(serviceType: string): Promise<AircraftListItem[]> {
     if (!VALID_SERVICE_TYPES.includes(serviceType)) {
       return [];
@@ -103,7 +108,7 @@ export class AircraftService {
     return result;
   }
 
-  private async fetchAll(options: { type?: string; serviceType?: string; onlyAvailable: boolean }): Promise<AircraftListItem[]> {
+  private async fetchAll(options: { id?: number; type?: string; serviceType?: string; onlyAvailable: boolean }): Promise<AircraftListItem[]> {
     // Use plain joins + a single representative image per aircraft (instead of
     // leftJoinAndSelect on the full images collection) so the query doesn't
     // multiply rows per aircraft image and drag the whole gallery over the wire.
@@ -113,6 +118,10 @@ export class AircraftService {
       .leftJoin('aircraft.images', 'images')
       .leftJoin('aircraft.aircraftTypeImagePlaceholder', 'aircraftType')
       .where('company.status = :companyStatus', { companyStatus: 'active' });
+
+    if (options.id) {
+      query = query.andWhere('aircraft.id = :id', { id: options.id });
+    }
 
     if (options.type) {
       query = query.andWhere('(aircraft.type = :type OR aircraftType.type = :type)', { type: options.type });

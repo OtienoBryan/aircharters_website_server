@@ -35,6 +35,20 @@ export class AircraftController {
     }
   }
 
+  @Get(':id')
+  @ApiOperation({ summary: 'Get a single aircraft by ID, including its image gallery' })
+  @ApiParam({ name: 'id', type: Number, description: 'Aircraft ID' })
+  @ApiResponse({ status: 200, description: 'Returns the aircraft' })
+  @ApiResponse({ status: 404, description: 'Aircraft not found' })
+  @Header('Cache-Control', 'public, max-age=30')
+  async getAircraftById(@Param('id', ParseIntPipe) id: number) {
+    const aircraft = await this.aircraftService.findById(id);
+    if (!aircraft) {
+      return { success: false, message: 'Aircraft not found', data: null };
+    }
+    return { success: true, data: aircraft };
+  }
+
   @Get(':id/images')
   @ApiOperation({ summary: 'Get all gallery images for a specific aircraft' })
   @ApiParam({ name: 'id', type: Number, description: 'Aircraft ID' })

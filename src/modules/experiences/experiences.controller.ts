@@ -78,6 +78,23 @@ export class ExperiencesController {
     };
   }
 
+  @Get(':id/schedules')
+  @ApiOperation({ summary: 'Get scheduled departures for an experience' })
+  @ApiParam({ name: 'id', description: 'Experience ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Experience schedules retrieved successfully',
+  })
+  async getExperienceSchedules(@Param('id', ParseIntPipe) id: number) {
+    const schedules = await this.experiencesService.getSchedulesByExperienceId(id);
+
+    return {
+      success: true,
+      message: 'Experience schedules retrieved successfully',
+      data: schedules,
+    };
+  }
+
   @Get(':id/availability')
   @ApiOperation({ summary: 'Get experience availability and pricing' })
   @ApiParam({ name: 'id', description: 'Experience ID' })

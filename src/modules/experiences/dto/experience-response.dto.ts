@@ -82,6 +82,65 @@ export class ExperienceCardDto {
 
   @ApiProperty()
   rating: string;
+
+  @ApiProperty({ required: false, description: 'Seats remaining on the next scheduled departure' })
+  seatsAvailable?: number;
+
+  @ApiProperty({ required: false, description: 'Start time of the next scheduled departure' })
+  startTime?: Date;
+
+  @ApiProperty({ required: false, enum: ['per_person', 'per_group', 'per_hour', 'per_flight'] })
+  priceUnit?: string;
+
+  @ApiProperty({ required: false, description: 'Total number of scheduled tours for this experience' })
+  scheduledToursCount?: number;
+}
+
+export class ExperienceScheduleDto {
+  @ApiProperty()
+  id: number;
+
+  @ApiProperty()
+  experienceId: number;
+
+  @ApiProperty({ required: false, nullable: true })
+  aircraftId?: number;
+
+  @ApiProperty({ required: false, nullable: true })
+  aircraftName?: string;
+
+  @ApiProperty({ required: false, nullable: true })
+  aircraftImageUrl?: string;
+
+  @ApiProperty()
+  startTime: Date;
+
+  @ApiProperty({ required: false, nullable: true })
+  endTime?: Date;
+
+  @ApiProperty({ enum: ['per_person', 'per_group', 'per_hour', 'per_flight'] })
+  priceUnit: string;
+
+  @ApiProperty()
+  durationMinutes: number;
+
+  @ApiProperty()
+  seatsAvailable: number;
+
+  @ApiProperty({ enum: ['scheduled', 'cancelled', 'completed'] })
+  status: string;
+
+  @ApiProperty({ required: false, nullable: true })
+  taxType?: string;
+
+  @ApiProperty()
+  subTotal: number;
+
+  @ApiProperty()
+  total: number;
+
+  @ApiProperty({ required: false })
+  taxAmount?: number;
 }
 
 export class ExperienceCategoryDto {

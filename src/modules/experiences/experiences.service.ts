@@ -3,7 +3,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ExperienceTemplate } from '../../common/entities/experience-template.entity';
 import { ExperienceImage } from '../../common/entities/experience-image.entity';
-import { ExperienceCardDto, ExperienceCategoryDto, ExperienceDetailDto } from './dto/experience-response.dto';
+import { ExperienceSchedule } from '../../common/entities/experience-schedule.entity';
+import { Aircraft } from '../../common/entities/aircraft.entity';
+import { AircraftImage } from '../../common/entities/aircraft-image.entity';
+import { ExperienceCardDto, ExperienceCategoryDto, ExperienceDetailDto, ExperienceScheduleDto } from './dto/experience-response.dto';
 
 @Injectable()
 export class ExperiencesService {
@@ -18,7 +21,82 @@ export class ExperiencesService {
     private readonly experienceTemplateRepository: Repository<ExperienceTemplate>,
     @InjectRepository(ExperienceImage)
     private readonly experienceImageRepository: Repository<ExperienceImage>,
+    @InjectRepository(ExperienceSchedule)
+    private readonly experienceScheduleRepository: Repository<ExperienceSchedule>,
+    @InjectRepository(Aircraft)
+    private readonly aircraftRepository: Repository<Aircraft>,
+    @InjectRepository(AircraftImage)
+    private readonly aircraftImageRepository: Repository<AircraftImage>,
   ) {}
+
+  // Schedules only carry an aircraftId; look up each aircraft's name and
+  // first image in one batched query instead of one query per schedule.
+  private async getAircraftInfoByIds(aircraftIds: number[]): Promise<Map<number, { name: string; imageUrl: string | null }>> {
+    const uniqueIds = [...new Set(aircraftIds.filter((id): id is number => id != null))];
+    const info = new Map<number, { name: string; imageUrl: string | null }>();
+    if (uniqueIds.length === 0) return info;
+
+    const aircraft = await this.aircraftRepository
+      .createQueryBuilder('a')
+      .where('a.id IN (:...ids)', { ids: uniqueIds })
+      .select(['a.id', 'a.name'])
+      .getMany();
+
+    const images = await this.aircraftImageRepository
+      .createQueryBuilder('img')
+      .where('img.aircraftId IN (:...ids)', { ids: uniqueIds })
+      .orderBy('img.id', 'ASC')
+      .getMany();
+
+    const firstImageByAircraftId = new Map<number, string>();
+    for (const image of images) {
+      if (!firstImageByAircraftId.has(image.aircraftId)) {
+        firstImageByAircraftId.set(image.aircraftId, image.url);
+      }
+    }
+
+    for (const ac of aircraft) {
+      info.set(ac.id, { name: ac.name, imageUrl: firstImageByAircraftId.get(ac.id) || null });
+    }
+    return info;
+  }
+
+  // Schedules are the bookable instances of a template; pick the earliest
+  // upcoming-or-scheduled one per experience so cards reflect real
+  // availability/pricing instead of the template's static placeholder values.
+  private async getNextSchedulesByExperienceId(): Promise<Map<number, ExperienceSchedule>> {
+    const schedules = await this.experienceScheduleRepository
+      .createQueryBuilder('s')
+      .where('s.status = :status', { status: 'scheduled' })
+      .orderBy('s.startTime', 'ASC')
+      .getMany();
+
+    const nextByExperienceId = new Map<number, ExperienceSchedule>();
+    for (const schedule of schedules) {
+      if (!nextByExperienceId.has(schedule.experienceId)) {
+        nextByExperienceId.set(schedule.experienceId, schedule);
+      }
+    }
+    return nextByExperienceId;
+  }
+
+  // Total count of scheduled (bookable) tours per experience, for display on
+  // the listing cards.
+  private async getScheduledCountsByExperienceId(): Promise<Map<number, number>> {
+    const rows = await this.experienceScheduleRepository
+      .createQueryBuilder('s')
+      .select('s.experienceId', 'experienceId')
+      .addSelect('COUNT(*)', 'count')
+      .where('s.status = :status', { status: 'scheduled' })
+      .groupBy('s.experienceId')
+      .getRawMany();
+
+    const countsByExperienceId = new Map<number, number>();
+    for (const row of rows) {
+      countsByExperienceId.set(Number(row.experienceId), Number(row.count));
+    }
+    return countsByExperienceId;
+  }
 
   async getAllExperiences(): Promise<ExperienceCategoryDto[]> {
     if (this.categoriesCache && this.categoriesCache.expiresAt > Date.now()) {
@@ -26,17 +104,21 @@ export class ExperiencesService {
     }
 
     // Get all active experiences with their images
-    const experiences = await this.experienceTemplateRepository
-      .createQueryBuilder('et')
-      .leftJoinAndSelect('et.images', 'ei')
-      .leftJoinAndSelect('et.company', 'c')
-      .where('et.isActive = :isActive', { isActive: true })
-      .orderBy('et.createdAt', 'DESC')
-      .getMany();
+    const [experiences, nextScheduleByExperienceId, scheduledCountByExperienceId] = await Promise.all([
+      this.experienceTemplateRepository
+        .createQueryBuilder('et')
+        .leftJoinAndSelect('et.images', 'ei')
+        .leftJoinAndSelect('et.company', 'c')
+        .where('et.isActive = :isActive', { isActive: true })
+        .orderBy('et.createdAt', 'DESC')
+        .getMany(),
+      this.getNextSchedulesByExperienceId(),
+      this.getScheduledCountsByExperienceId(),
+    ]);
 
     // Group experiences by category (using city as category for now)
     const categoriesMap = new Map<string, ExperienceTemplate[]>();
-    
+
     experiences.forEach(experience => {
       const category = this.getCategoryFromExperience(experience);
       if (!categoriesMap.has(category)) {
@@ -48,7 +130,11 @@ export class ExperiencesService {
     // Transform to DTO format
     const categories: ExperienceCategoryDto[] = [];
     categoriesMap.forEach((experiences, categoryTitle) => {
-      const deals = experiences.map(exp => this.transformToCardDto(exp));
+      const deals = experiences.map(exp => this.transformToCardDto(
+        exp,
+        nextScheduleByExperienceId.get(exp.id),
+        scheduledCountByExperienceId.get(exp.id) ?? 0,
+      ));
       categories.push({
         title: categoryTitle,
         deals,
@@ -77,18 +163,58 @@ export class ExperiencesService {
   }
 
   async getExperiencesByCategory(category: string): Promise<ExperienceCardDto[]> {
-    const experiences = await this.experienceTemplateRepository
-      .createQueryBuilder('et')
-      .leftJoinAndSelect('et.images', 'ei')
-      .leftJoinAndSelect('et.company', 'c')
-      .where('et.isActive = :isActive', { isActive: true })
-      .andWhere('et.city LIKE :category OR et.country LIKE :category', { 
-        category: `%${category}%` 
-      })
-      .orderBy('et.createdAt', 'DESC')
+    const [experiences, nextScheduleByExperienceId, scheduledCountByExperienceId] = await Promise.all([
+      this.experienceTemplateRepository
+        .createQueryBuilder('et')
+        .leftJoinAndSelect('et.images', 'ei')
+        .leftJoinAndSelect('et.company', 'c')
+        .where('et.isActive = :isActive', { isActive: true })
+        .andWhere('et.city LIKE :category OR et.country LIKE :category', {
+          category: `%${category}%`
+        })
+        .orderBy('et.createdAt', 'DESC')
+        .getMany(),
+      this.getNextSchedulesByExperienceId(),
+      this.getScheduledCountsByExperienceId(),
+    ]);
+
+    return experiences.map(exp => this.transformToCardDto(
+      exp,
+      nextScheduleByExperienceId.get(exp.id),
+      scheduledCountByExperienceId.get(exp.id) ?? 0,
+    ));
+  }
+
+  async getSchedulesByExperienceId(experienceId: number): Promise<ExperienceScheduleDto[]> {
+    const schedules = await this.experienceScheduleRepository
+      .createQueryBuilder('s')
+      .where('s.experienceId = :experienceId', { experienceId })
+      .andWhere('s.status = :status', { status: 'scheduled' })
+      .orderBy('s.startTime', 'ASC')
       .getMany();
 
-    return experiences.map(exp => this.transformToCardDto(exp));
+    const aircraftInfoById = await this.getAircraftInfoByIds(schedules.map(s => s.aircraftId));
+
+    return schedules.map(s => {
+      const aircraftInfo = s.aircraftId ? aircraftInfoById.get(s.aircraftId) : undefined;
+      return {
+        id: s.id,
+        experienceId: s.experienceId,
+        aircraftId: s.aircraftId,
+        aircraftName: aircraftInfo?.name,
+        aircraftImageUrl: aircraftInfo?.imageUrl ?? undefined,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        priceUnit: s.priceUnit,
+        durationMinutes: s.durationMinutes,
+        seatsAvailable: s.seatsAvailable,
+        status: s.status,
+        taxType: s.taxType,
+        subTotal: s.subTotal,
+        total: s.total,
+        taxAmount: s.taxAmount,
+      };
+    });
   }
 
   async getExperienceAvailability(id: number): Promise<any> {
@@ -140,22 +266,26 @@ export class ExperiencesService {
     }
   }
 
-  private transformToCardDto(experience: ExperienceTemplate): ExperienceCardDto {
+  private transformToCardDto(experience: ExperienceTemplate, schedule?: ExperienceSchedule, scheduledToursCount: number = 0): ExperienceCardDto {
     // Get the first image (main image)
-    const mainImage = experience.images?.find(img => img.imageSlot === 'image1') || 
+    const mainImage = experience.images?.find(img => img.imageSlot === 'image1') ||
                      experience.images?.[0];
-    
+
     // Calculate average rating (placeholder for now)
     const rating = '4.8';
-    
+
     return {
       id: experience.id,
       imageUrl: mainImage?.url || 'https://images.unsplash.com/photo-1540979388789-6cee28a1cdc9?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80',
       title: experience.title,
       location: `${experience.city}, ${experience.country}`,
-      duration: `${experience.durationMinutes} minutes`,
-      price: `$${experience.total}`,
+      duration: `${schedule?.durationMinutes ?? experience.durationMinutes} minutes`,
+      price: `$${schedule?.total ?? experience.total}`,
       rating,
+      seatsAvailable: schedule?.seatsAvailable,
+      startTime: schedule?.startTime,
+      priceUnit: schedule?.priceUnit,
+      scheduledToursCount,
     };
   }
 
