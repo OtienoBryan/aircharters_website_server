@@ -12,6 +12,7 @@ import { Payment } from '../../common/entities/payment.entity';
 import { AircraftTypeImagePlaceholder } from '../../common/entities/aircraft-type-image-placeholder.entity';
 import { SearchDirectCharterDto } from './dto/search-direct-charter.dto';
 import { BookDirectCharterDto } from './dto/book-direct-charter.dto';
+import { RequestQuoteDto } from './dto/request-quote.dto';
 import { PaymentProviderService } from '../payments/services/payment-provider.service';
 import { PaymentProviderType } from '../payments/interfaces/payment-provider.interface';
 import { GoogleEarthEngineService } from '../google-earth-engine/google-earth-engine.service';
@@ -640,6 +641,128 @@ export class DirectCharterService {
       console.log('=== BACKEND SERVICE: RELEASING QUERY RUNNER ===');
       await queryRunner.release();
     }
+  }
+
+  /**
+   * Create a `pending` charter booking that is awaiting an operator quote.
+   * No payment is taken and no passenger details are required at this stage —
+   * the operator reviews the request, prices it (status -> 'priced'), and the
+   * customer pays afterwards to confirm.
+   */
+  async requestQuote(dto: RequestQuoteDto, userId: string) {
+    const { aircraftId, origin, destination, departureDateTime, passengerCount } = dto;
+
+    // Resolve the aircraft to attach the operating company.
+    const aircraft = await this.aircraftRepository.findOne({
+      where: { id: aircraftId },
+      relations: ['company'],
+    });
+    if (!aircraft) {
+      throw new NotFoundException(`Aircraft with ID ${aircraftId} not found`);
+    }
+
+    // Generate a unique reference number for the request.
+    const referenceNumber = `AC${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+
+    // Best-effort geocoding + flight metrics; never block the request on these.
+    const [originCoords, destinationCoords] = await Promise.all([
+      this.getLocationCoordinates(origin),
+      this.getLocationCoordinates(destination),
+    ]);
+
+    let distanceNm: number | null = null;
+    let estimatedFlightHours: number | null = null;
+    let estimatedArrivalTime: Date | null = null;
+    try {
+      if (originCoords && destinationCoords) {
+        const distanceKm = this.googleEarthEngineService.calculateFlightDistance(
+          originCoords.lat,
+          originCoords.lng,
+          destinationCoords.lat,
+          destinationCoords.lng,
+        );
+        distanceNm = Math.round(this.kmToNm(distanceKm) * 100) / 100;
+      }
+      const duration = await this.computeDurationHours(origin, destination, aircraft);
+      estimatedFlightHours = Math.round(duration * 100) / 100;
+      const dep = new Date(departureDateTime);
+      estimatedArrivalTime = new Date(dep.getTime() + duration * 3600 * 1000);
+    } catch (e) {
+      // Leave metrics as null if anything fails.
+    }
+
+    const now = new Date();
+    const booking = this.bookingRepository.create({
+      userId,
+      dealId: null,
+      companyId: aircraft.company?.id || 1,
+      aircraftId,
+      bookingType: BookingType.DIRECT,
+      // Price is unknown until the operator quotes it — leave it unset.
+      bookingStatus: BookingStatus.PENDING, // waiting for quote
+      paymentStatus: PaymentStatus.PENDING,
+      referenceNumber,
+      specialRequirements: dto.specialRequests || null,
+      originName: origin,
+      destinationName: destination,
+      departureDateTime: new Date(departureDateTime),
+      estimatedFlightHours: estimatedFlightHours ?? null,
+      estimatedArrivalTime: estimatedArrivalTime ?? null,
+      originLatitude: originCoords?.lat ?? null,
+      originLongitude: originCoords?.lng ?? null,
+      destinationLatitude: destinationCoords?.lat ?? null,
+      destinationLongitude: destinationCoords?.lng ?? null,
+      distanceNm: distanceNm ?? null,
+      totalAdults: passengerCount,
+      totalChildren: 0,
+      onboardDining: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const savedArr = await this.bookingRepository.save(booking);
+    const savedBooking = Array.isArray(savedArr) ? savedArr[0] : savedArr;
+
+    // Persist any waypoints. Coordinates are NOT NULL on the table, so geocode
+    // the names best-effort and fall back to 0/0 when a lookup fails.
+    if (dto.stops && dto.stops.length > 0) {
+      for (let i = 0; i < dto.stops.length; i++) {
+        const stopDto = dto.stops[i];
+        const coords = await this.getLocationCoordinates(stopDto.stopName);
+        const stop = this.bookingStopRepository.create({
+          bookingId: savedBooking.id,
+          stopName: stopDto.stopName,
+          longitude: coords?.lng ?? 0,
+          latitude: coords?.lat ?? 0,
+          stopOrder: stopDto.stopOrder || i + 1,
+          locationType: LocationType.CUSTOM,
+        });
+        await this.bookingStopRepository.save(stop);
+      }
+    }
+
+    // Notify the operator that a quote has been requested (best-effort).
+    try {
+      const user = await this.dataSource.manager.findOne(User, {
+        where: { id: userId },
+        select: ['id', 'first_name', 'last_name', 'email'],
+      });
+      if (user) {
+        await this.sendCharterBookingNotifications(savedBooking, aircraft, user);
+      }
+    } catch (notificationError) {
+      console.error('Failed to send quote request notifications:', notificationError);
+    }
+
+    return {
+      booking: {
+        id: savedBooking.id,
+        referenceNumber,
+        bookingStatus: savedBooking.bookingStatus,
+        paymentStatus: savedBooking.paymentStatus,
+      },
+      message: 'Quote request submitted. Our team will review your trip and send a price shortly.',
+    };
   }
 
   async getAircraftTypes() {

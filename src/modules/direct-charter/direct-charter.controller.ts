@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { DirectCharterService } from './direct-charter.service';
 import { SearchDirectCharterDto } from './dto/search-direct-charter.dto';
 import { BookDirectCharterDto } from './dto/book-direct-charter.dto';
+import { RequestQuoteDto } from './dto/request-quote.dto';
 
 @ApiTags('Direct Charter')
 @Controller('direct-charter')
@@ -87,6 +88,33 @@ export class DirectCharterController {
       return {
         success: false,
         message: error.message || 'Failed to book direct charter',
+        data: null,
+      };
+    }
+  }
+
+  @Post('request-quote')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Submit a direct charter quote request (creates a pending booking, no payment)' })
+  @ApiResponse({ status: 201, description: 'Quote request created successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid request data' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async requestQuote(
+    @Body() dto: RequestQuoteDto,
+    @Request() req: any
+  ) {
+    try {
+      const result = await this.directCharterService.requestQuote(dto, req.user.id);
+      return {
+        success: true,
+        data: result,
+        message: 'Quote request submitted successfully',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message || 'Failed to submit quote request',
         data: null,
       };
     }
