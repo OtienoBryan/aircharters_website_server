@@ -16,6 +16,17 @@ import { EmailService } from '../email/email.service';
 import { SmsService } from '../sms/sms.service';
 import { ChartersCompany } from '../../common/entities/charters-company.entity';
 
+/**
+ * A booking's type should reflect what the aircraft is actually being used
+ * for (medical evacuation, cargo, or a regular passenger charter), not just
+ * "direct" by default - so resolve it from the aircraft's serviceType.
+ */
+function resolveBookingType(serviceType: string | null | undefined): BookingType {
+  if (serviceType === 'medical') return BookingType.MEDIVAC;
+  if (serviceType === 'cargo') return BookingType.CARGO;
+  return BookingType.DIRECT;
+}
+
 @Injectable()
 export class BookingInquiriesService {
   constructor(
@@ -264,7 +275,7 @@ export class BookingInquiriesService {
       userId: inquiry.userId,
       dealId: null, // No deal for inquiry-based bookings
       companyId: inquiry.company_id,
-      bookingType: BookingType.DIRECT,
+      bookingType: resolveBookingType(inquiry.aircraft?.serviceType),
       totalPrice: inquiry.proposedPrice || 0,
       onboardDining: inquiry.onboardDining,
       referenceNumber: inquiry.referenceNumber,

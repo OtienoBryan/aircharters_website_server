@@ -1,6 +1,11 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index, ManyToOne, JoinColumn } from 'typeorm';
 import { Booking } from './booking.entity';
 
+export enum PassengerIdType {
+  PASSPORT = 'passport',
+  NATIONAL_ID = 'national_id',
+}
+
 @Entity('charter_passengers')
 export class Passenger {
   @PrimaryGeneratedColumn()
@@ -24,6 +29,9 @@ export class Passenger {
 
   @Column({ name: 'id_passport_number', type: 'varchar', length: 100, nullable: true })
   id_passport_number: string;
+
+  @Column({ name: 'id_type', type: 'enum', enum: PassengerIdType, default: PassengerIdType.PASSPORT, nullable: true })
+  id_type: PassengerIdType;
 
   @Column({ name: 'is_user', type: 'boolean', default: false })
   is_user: boolean;

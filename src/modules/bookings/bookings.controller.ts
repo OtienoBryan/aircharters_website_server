@@ -9,8 +9,11 @@ import {
   UseGuards,
   Request,
   Query,
+  Res,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
+import { Response } from 'express';
 import {
   ApiTags,
   ApiOperation,
@@ -24,6 +27,7 @@ import { CreateBookingDto } from './dto/create-booking.dto';
 import { BookingStatusResponseDto } from './dto/booking-status-response.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { BookingStatus, PaymentStatus } from '../../common/entities/booking.entity';
+import { PaymentProviderType } from '../payments/interfaces/payment-provider.interface';
 
 @ApiTags('Bookings')
 @Controller('bookings')
@@ -218,6 +222,31 @@ export class BookingsController {
     };
   }
 
+  @Get(':reference/documents')
+  @ApiOperation({ summary: 'Generate a boarding-pass style e-ticket PDF for a booking' })
+  @ApiParam({ name: 'reference', type: String, description: 'Booking reference number' })
+  @ApiQuery({ name: 'format', required: false, description: 'Only "pdf" is supported today' })
+  @ApiResponse({ status: 200, description: 'PDF document stream' })
+  @ApiResponse({ status: 403, description: 'Not your booking' })
+  @ApiResponse({ status: 404, description: 'Booking not found' })
+  async getBookingDocuments(
+    @Param('reference') reference: string,
+    @Request() req,
+    @Res() res: Response,
+  ) {
+    const booking = await this.bookingsService.findByReference(reference);
+
+    if (booking.userId !== req.user.sub) {
+      throw new ForbiddenException('You can only view documents for your own bookings');
+    }
+
+    const doc = this.bookingsService.bookingDocumentService.generateETicketPdf(booking);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="e-ticket-${booking.referenceNumber}.pdf"`);
+    doc.pipe(res);
+  }
+
   @Patch(':id/status')
   @ApiOperation({ summary: 'Update booking status' })
   @ApiParam({ name: 'id', type: String, description: 'Booking ID' })
@@ -350,6 +379,7 @@ export class BookingsController {
             referenceNumber: { type: 'string' },
             bookingStatus: { type: 'string' },
             paymentStatus: { type: 'string' },
+            createdAt: { type: 'string', format: 'date-time' },
             loyaltyPointsEarned: { type: 'number' },
             paymentTransactionId: { type: 'string' },
           },
@@ -384,6 +414,7 @@ export class BookingsController {
         referenceNumber: booking.referenceNumber,
         bookingStatus: booking.bookingStatus,
         paymentStatus: booking.paymentStatus,
+        createdAt: booking.createdAt,
         // loyaltyPointsEarned: booking.loyaltyPointsEarned, // Not in database
         // paymentTransactionId: booking.paymentTransactionId, // Not in database
       },
@@ -429,13 +460,18 @@ export class BookingsController {
     @Body() body: {
       paymentIntentId: string;
       paymentMethodId?: string;
+      provider?: PaymentProviderType;
     }
   ) {
-    // 1. Confirm payment with Stripe
+    // 1. Confirm payment with the gateway the payment intent was created with
     const payment = await this.bookingsService.paymentProviderService.confirmPayment({
       paymentIntentId: body.paymentIntentId,
       paymentMethodId: body.paymentMethodId,
-    });
+    }, body.provider || PaymentProviderType.PAYSTACK);
+
+    if (payment.status !== 'succeeded') {
+      throw new BadRequestException(`Payment was not successful (status: ${payment.status})`);
+    }
 
     // 2. Process booking payment
     const booking = await this.bookingsService.bookingPaymentService.processPayment(

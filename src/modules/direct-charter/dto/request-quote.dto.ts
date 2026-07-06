@@ -1,11 +1,11 @@
-import { IsString, IsNotEmpty, IsDateString, IsInt, Min, Max, IsOptional, IsArray, ValidateNested } from 'class-validator';
+import { IsString, IsNotEmpty, IsDateString, IsInt, Min, Max, IsOptional, IsArray, ValidateNested, IsNumber, IsLatitude, IsLongitude } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
 /**
  * A waypoint on a quote request. Only the name (and optional order) is
- * required here — coordinates are resolved server-side when the booking
- * row is created.
+ * required here. Coordinates are resolved server-side when the booking row
+ * is created, unless the client already captured them via place selection.
  */
 export class QuoteStopDto {
   @ApiProperty({ description: 'Name of the stop location' })
@@ -18,6 +18,16 @@ export class QuoteStopDto {
   @Min(1)
   @IsOptional()
   stopOrder?: number;
+
+  @ApiProperty({ description: 'Stop latitude (from place selection)', required: false })
+  @IsOptional()
+  @IsLatitude()
+  latitude?: number;
+
+  @ApiProperty({ description: 'Stop longitude (from place selection)', required: false })
+  @IsOptional()
+  @IsLongitude()
+  longitude?: number;
 }
 
 /**
@@ -40,6 +50,28 @@ export class RequestQuoteDto {
   @IsString()
   @IsNotEmpty()
   destination: string;
+
+  // Coordinates resolved on the client via Google Places autocomplete. When
+  // present they are used directly; otherwise the server geocodes the names.
+  @ApiProperty({ description: 'Origin latitude (from place selection)', required: false })
+  @IsOptional()
+  @IsLatitude()
+  originLatitude?: number;
+
+  @ApiProperty({ description: 'Origin longitude (from place selection)', required: false })
+  @IsOptional()
+  @IsLongitude()
+  originLongitude?: number;
+
+  @ApiProperty({ description: 'Destination latitude (from place selection)', required: false })
+  @IsOptional()
+  @IsLatitude()
+  destinationLatitude?: number;
+
+  @ApiProperty({ description: 'Destination longitude (from place selection)', required: false })
+  @IsOptional()
+  @IsLongitude()
+  destinationLongitude?: number;
 
   @ApiProperty({ description: 'Departure date and time (ISO string)' })
   @IsDateString()

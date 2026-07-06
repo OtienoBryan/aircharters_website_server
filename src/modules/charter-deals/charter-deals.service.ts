@@ -69,8 +69,8 @@ export class CharterDealsService {
     limit: number = 10,
     searchQuery?: string,
     dealType?: string,
-    fromDate?: Date,
-    toDate?: Date,
+    fromDate?: string,
+    toDate?: string,
   ): Promise<{ deals: CharterDealWithRelations[]; total: number }> {
     const cacheKey = JSON.stringify({ page, limit, searchQuery, dealType, fromDate, toDate });
     const cached = this.listCache.get(cacheKey);
@@ -88,8 +88,8 @@ export class CharterDealsService {
     limit: number = 10,
     searchQuery?: string,
     dealType?: string,
-    fromDate?: Date,
-    toDate?: Date,
+    fromDate?: string,
+    toDate?: string,
   ): Promise<{ deals: CharterDealWithRelations[]; total: number }> {
     const offset = (page - 1) * limit;
 
@@ -338,8 +338,8 @@ export class CharterDealsService {
     destination: string,
     page: number = 1,
     limit: number = 10,
-    fromDate?: Date,
-    toDate?: Date,
+    fromDate?: string,
+    toDate?: string,
   ): Promise<{ deals: CharterDealWithRelations[]; total: number }> {
     const offset = (page - 1) * limit;
 
@@ -604,11 +604,11 @@ export class CharterDealsService {
 
     // Add date filters
     if (fromDate) {
-      query = query.andWhere('deal.date >= :fromDate', { fromDate: new Date(fromDate) });
+      query = query.andWhere('deal.date >= :fromDate', { fromDate });
     }
 
     if (toDate) {
-      query = query.andWhere('deal.date <= :toDate', { toDate: new Date(toDate) });
+      query = query.andWhere('deal.date <= :toDate', { toDate });
     }
 
     // Add aircraft type filter

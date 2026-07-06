@@ -43,6 +43,7 @@ export class BookingQueryService {
       .leftJoinAndSelect('booking.deal', 'deal')
       .leftJoinAndSelect('booking.company', 'company')
       .leftJoinAndSelect('deal.aircraft', 'aircraft')
+      .leftJoinAndSelect('booking.aircraft', 'directAircraft')
       .where('booking.id = :id', { id })
       .getOne();
 
@@ -64,6 +65,7 @@ export class BookingQueryService {
       .leftJoinAndSelect('booking.deal', 'deal')
       .leftJoinAndSelect('booking.company', 'company')
       .leftJoinAndSelect('deal.aircraft', 'aircraft')
+      .leftJoinAndSelect('booking.aircraft', 'directAircraft')
       .where('booking.referenceNumber = :referenceNumber', { referenceNumber })
       .getOne();
 
@@ -88,6 +90,7 @@ export class BookingQueryService {
       .leftJoinAndSelect('booking.deal', 'deal')
       .leftJoinAndSelect('booking.company', 'company')
       .leftJoinAndSelect('deal.aircraft', 'aircraft')
+      .leftJoinAndSelect('booking.aircraft', 'directAircraft')
       .where('booking.userId = :userId', { userId });
 
     // Filter by upcoming/past bookings

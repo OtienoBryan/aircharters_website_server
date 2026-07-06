@@ -88,7 +88,9 @@ export class PaystackProvider implements PaymentProvider {
         email: request.metadata?.customerEmail || 'customer@example.com',
         currency: paystackCurrency,
         reference: this.generateReference(request.bookingId),
-        callback_url: process.env.PAYSTACK_CALLBACK_URL || `${process.env.APP_URL || 'http://localhost:5000'}/api/payments/paystack/verify`,
+        // CLIENT_APP_URL is the customer-facing booking SPA (charters_web/client),
+        // distinct from FRONTEND_URL which points at the company/admin dashboard.
+        callback_url: `${process.env.CLIENT_APP_URL || 'http://localhost:5173'}/booking/verify?bookingId=${request.bookingId}`,
         metadata: {
           bookingId: request.bookingId,
           companyId: request.metadata?.companyId,
@@ -196,12 +198,9 @@ export class PaystackProvider implements PaymentProvider {
         errorMessage: !isSuccessful ? (transaction.message || transaction.gateway_response || 'Payment failed') : null,
       });
 
-      // Update booking status if payment was successful
-      if (isSuccessful && transaction.metadata?.bookingId) {
-        await this.updateBookingStatus(transaction.metadata.bookingId, true);
-      } else if (!isSuccessful && transaction.metadata?.bookingId) {
-        await this.updateBookingStatus(transaction.metadata.bookingId, false);
-      }
+      // Note: booking paymentStatus/bookingStatus is intentionally NOT updated here.
+      // Callers (e.g. BookingPaymentService.processPayment) own that transition so it
+      // stays consistent with the Stripe path - this method only verifies with the gateway.
 
       return {
         id: transaction.reference,

@@ -186,10 +186,16 @@ export class ExperiencesService {
   }
 
   async getSchedulesByExperienceId(experienceId: number): Promise<ExperienceScheduleDto[]> {
+    // Use a raw YYYY-MM-DD string (not a JS Date) so mysql2 doesn't re-serialize
+    // it through the server's local timezone, which would shift the cutoff
+    // and drop today's schedules (same class of bug fixed in charter-deals).
+    const todayStr = new Date().toISOString().slice(0, 10);
+
     const schedules = await this.experienceScheduleRepository
       .createQueryBuilder('s')
       .where('s.experienceId = :experienceId', { experienceId })
       .andWhere('s.status = :status', { status: 'scheduled' })
+      .andWhere('s.startTime >= :todayStr', { todayStr })
       .orderBy('s.startTime', 'ASC')
       .getMany();
 

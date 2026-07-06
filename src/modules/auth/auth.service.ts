@@ -114,11 +114,13 @@ export class AuthService {
   async loginWithEmail(email: string, password: string) {
     try {
       console.log('🔥 Backend login attempt for:', email);
-      
-      // Find user by email
-      const user = await this.userRepository.findOne({
-        where: { email }
-      });
+
+      // Find user by email (password column is select:false by default, so re-add it explicitly)
+      const user = await this.userRepository
+        .createQueryBuilder('user')
+        .addSelect('user.password')
+        .where('user.email = :email', { email })
+        .getOne();
 
       if (!user) {
         throw new UnauthorizedException('Invalid email or password');
@@ -177,11 +179,13 @@ export class AuthService {
   async loginWithPhone(phoneNumber: string, password: string) {
     try {
       console.log('🔥 Backend phone login attempt for:', phoneNumber);
-      
-      // Find user by phone number
-      const user = await this.userRepository.findOne({
-        where: { phone_number: phoneNumber }
-      });
+
+      // Find user by phone number (password column is select:false by default, so re-add it explicitly)
+      const user = await this.userRepository
+        .createQueryBuilder('user')
+        .addSelect('user.password')
+        .where('user.phone_number = :phoneNumber', { phoneNumber })
+        .getOne();
 
       if (!user) {
         throw new UnauthorizedException('Invalid phone number or password');

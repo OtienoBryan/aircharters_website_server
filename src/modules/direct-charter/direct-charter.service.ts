@@ -20,6 +20,18 @@ import { PassengerValidationService } from './services/passenger-validation.serv
 import { EmailService } from '../email/email.service';
 import { SmsService } from '../sms/sms.service';
 
+/**
+ * A booking's type should reflect what the aircraft is actually being used
+ * for (medical evacuation, cargo, or a regular passenger charter), not just
+ * "direct" by default - so callers must resolve it from the aircraft's
+ * serviceType rather than hardcoding BookingType.DIRECT.
+ */
+function resolveBookingType(serviceType: string | null | undefined): BookingType {
+  if (serviceType === 'medical') return BookingType.MEDIVAC;
+  if (serviceType === 'cargo') return BookingType.CARGO;
+  return BookingType.DIRECT;
+}
+
 @Injectable()
 export class DirectCharterService {
   constructor(
@@ -399,7 +411,7 @@ export class DirectCharterService {
         dealId: null, // Direct charter doesn't use deals
         companyId: aircraft.company?.id || 1,
         aircraftId: bookDto.aircraftId, // Add aircraft ID for direct bookings
-        bookingType: BookingType.DIRECT,
+        bookingType: resolveBookingType(aircraft.serviceType),
         totalPrice: bookDto.totalPrice,
         bookingStatus: BookingStatus.PENDING, // Start as pending, will be confirmed after payment
         paymentStatus: PaymentStatus.PENDING,
@@ -664,10 +676,21 @@ export class DirectCharterService {
     // Generate a unique reference number for the request.
     const referenceNumber = `AC${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
 
+    // Prefer coordinates the client already captured from Google Places
+    // autocomplete; only geocode server-side for the ones not supplied.
+    const clientOriginCoords =
+      dto.originLatitude != null && dto.originLongitude != null
+        ? { lat: dto.originLatitude, lng: dto.originLongitude }
+        : null;
+    const clientDestinationCoords =
+      dto.destinationLatitude != null && dto.destinationLongitude != null
+        ? { lat: dto.destinationLatitude, lng: dto.destinationLongitude }
+        : null;
+
     // Best-effort geocoding + flight metrics; never block the request on these.
     const [originCoords, destinationCoords] = await Promise.all([
-      this.getLocationCoordinates(origin),
-      this.getLocationCoordinates(destination),
+      clientOriginCoords ?? this.getLocationCoordinates(origin),
+      clientDestinationCoords ?? this.getLocationCoordinates(destination),
     ]);
 
     let distanceNm: number | null = null;
@@ -697,7 +720,7 @@ export class DirectCharterService {
       dealId: null,
       companyId: aircraft.company?.id || 1,
       aircraftId,
-      bookingType: BookingType.DIRECT,
+      bookingType: resolveBookingType(aircraft.serviceType),
       // Price is unknown until the operator quotes it — leave it unset.
       bookingStatus: BookingStatus.PENDING, // waiting for quote
       paymentStatus: PaymentStatus.PENDING,
@@ -723,12 +746,16 @@ export class DirectCharterService {
     const savedArr = await this.bookingRepository.save(booking);
     const savedBooking = Array.isArray(savedArr) ? savedArr[0] : savedArr;
 
-    // Persist any waypoints. Coordinates are NOT NULL on the table, so geocode
-    // the names best-effort and fall back to 0/0 when a lookup fails.
+    // Persist any waypoints. Coordinates are NOT NULL on the table - prefer
+    // whatever the client already captured via place selection, and only
+    // geocode server-side (best-effort) for stops missing them.
     if (dto.stops && dto.stops.length > 0) {
       for (let i = 0; i < dto.stops.length; i++) {
         const stopDto = dto.stops[i];
-        const coords = await this.getLocationCoordinates(stopDto.stopName);
+        const coords =
+          stopDto.latitude != null && stopDto.longitude != null
+            ? { lat: stopDto.latitude, lng: stopDto.longitude }
+            : await this.getLocationCoordinates(stopDto.stopName);
         const stop = this.bookingStopRepository.create({
           bookingId: savedBooking.id,
           stopName: stopDto.stopName,
@@ -741,14 +768,15 @@ export class DirectCharterService {
       }
     }
 
-    // Notify the operator that a quote has been requested (best-effort).
+    // Email the client (request received) and the operator (post a quote in
+    // their dashboard) - best-effort, must never fail the request itself.
     try {
       const user = await this.dataSource.manager.findOne(User, {
         where: { id: userId },
         select: ['id', 'first_name', 'last_name', 'email'],
       });
       if (user) {
-        await this.sendCharterBookingNotifications(savedBooking, aircraft, user);
+        await this.sendQuoteRequestNotifications(savedBooking, aircraft, user, dto);
       }
     } catch (notificationError) {
       console.error('Failed to send quote request notifications:', notificationError);
@@ -766,9 +794,13 @@ export class DirectCharterService {
   }
 
   async getAircraftTypes() {
-    return await this.aircraftTypeImagePlaceholderRepository.find({
-      order: { type: 'ASC' }
-    });
+    // Only show fleet categories that have at least one active (isAvailable) aircraft.
+    return await this.aircraftTypeImagePlaceholderRepository
+      .createQueryBuilder('placeholder')
+      .innerJoin('placeholder.aircraft', 'aircraft', 'aircraft.isAvailable = :isAvailable', { isAvailable: true })
+      .distinct(true)
+      .orderBy('placeholder.type', 'ASC')
+      .getMany();
   }
 
   async getAircraftByType(typeId?: number, userLocation?: string) {
@@ -945,8 +977,57 @@ export class DirectCharterService {
       throw error;
     }
   }
-}
-function andWhere(arg0: string, arg1: { companyStatus: string; }) {
-  throw new Error('Function not implemented.');
+
+  /**
+   * Emails both sides of a quote request: the client gets a "request
+   * received" confirmation, and the operator is prompted to log in and post
+   * a price - deliberately without sharing the client's email address.
+   */
+  private async sendQuoteRequestNotifications(
+    booking: Booking,
+    aircraft: Aircraft,
+    user: User,
+    dto: RequestQuoteDto,
+  ): Promise<void> {
+    const company = aircraft.company ?? (await this.companyRepository.findOne({ where: { id: aircraft.companyId } }));
+    if (!company) {
+      console.error('Charter company not found for aircraft:', aircraft.id);
+      return;
+    }
+
+    const typeLabel = resolveBookingType(aircraft.serviceType) === BookingType.MEDIVAC
+      ? 'Medical Evacuation'
+      : resolveBookingType(aircraft.serviceType) === BookingType.CARGO
+        ? 'Cargo'
+        : 'Direct Charter';
+    const clientName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Traveler';
+    const departureLabel = booking.departureDateTime ? new Date(booking.departureDateTime).toLocaleString() : 'TBA';
+
+    if (user.email) {
+      await this.emailService.sendQuoteRequestConfirmationToClient(user.email, {
+        referenceNumber: booking.referenceNumber,
+        bookingType: typeLabel,
+        clientName,
+        originName: booking.originName || dto.origin,
+        destinationName: booking.destinationName || dto.destination,
+        departureDateTime: departureLabel,
+        aircraftName: aircraft.name,
+      });
+    }
+
+    if (company.email) {
+      await this.emailService.sendQuoteRequestNotificationToOperator(company.email, {
+        referenceNumber: booking.referenceNumber,
+        bookingType: typeLabel,
+        clientName,
+        originName: booking.originName || dto.origin,
+        destinationName: booking.destinationName || dto.destination,
+        departureDateTime: departureLabel,
+        passengerCount: dto.passengerCount,
+        aircraftName: aircraft.name,
+        specialRequests: dto.specialRequests,
+      });
+    }
+  }
 }
 

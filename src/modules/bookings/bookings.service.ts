@@ -17,6 +17,7 @@ import { PaymentProviderType } from '../payments/interfaces/payment-provider.int
 import { User } from '../../common/entities/user.entity';
 import { UserTrip } from '../../common/entities/user-trips.entity';
 import { ExperienceTemplate } from '../../common/entities/experience-template.entity';
+import { BookingDocumentService } from './services/booking-document.service';
 
 @Injectable()
 export class BookingsService {
@@ -37,6 +38,7 @@ export class BookingsService {
     private readonly bookingQueryService: BookingQueryService,
     public readonly paymentProviderService: PaymentProviderService,
     private readonly emailService: EmailService,
+    public readonly bookingDocumentService: BookingDocumentService,
   ) {}
 
   async testUserExists(userId: string) {
@@ -218,6 +220,7 @@ export class BookingsService {
           age: passengerData.age || null, // Use null instead of undefined
           nationality: passengerData.nationality || null, // Use null instead of undefined
           id_passport_number: passengerData.idPassportNumber || null, // Use null instead of undefined
+          id_type: passengerData.idType || null,
           is_user: passengerData.isUser === true,
         });
 
@@ -273,6 +276,11 @@ export class BookingsService {
       let paymentIntent = null;
       if (booking.totalPrice > 0) {
         try {
+          const payingUser = await queryRunner.manager.findOne(User, {
+            where: { id: userId },
+            select: ['id', 'email'],
+          });
+
           paymentIntent = await this.paymentProviderService.createPaymentIntent({
         amount: booking.totalPrice,
         currency: 'USD',
@@ -284,9 +292,11 @@ export class BookingsService {
           referenceNumber: booking.referenceNumber,
           dealId: booking.dealId,
           company_id: booking.companyId,
+          companyId: booking.companyId,
+          customerEmail: payingUser?.email,
               bookingType: 'deal_booking',
             },
-          }, PaymentProviderType.PAYSTACK);
+          }, createBookingDto.paymentProvider || PaymentProviderType.PAYSTACK);
         } catch (error) {
           console.error('Failed to create payment intent for deal booking:', error);
           // If payment intent creation fails, rollback the entire transaction
@@ -407,7 +417,51 @@ export class BookingsService {
       departureDateTime: deal?.date || experience?.scheduledDate,
     });
 
-    return await queryRunner.manager.save(booking);
+    const savedBooking = await queryRunner.manager.save(booking);
+
+    // Prepare passengers list - always include the user as the first passenger
+    const user = await queryRunner.manager.findOne(User, {
+      where: { id: userId },
+      select: ['id', 'first_name', 'last_name', 'nationality'],
+    });
+
+    const userInPassengers = createBookingDto.passengers?.find(p =>
+      p.firstName.toLowerCase() === user?.first_name?.toLowerCase() &&
+      p.lastName.toLowerCase() === user?.last_name?.toLowerCase()
+    );
+
+    const passengersToCreate = [];
+    if (user && !userInPassengers) {
+      passengersToCreate.push({
+        firstName: user.first_name || 'Unknown',
+        lastName: user.last_name || 'User',
+        nationality: user.nationality,
+        idPassportNumber: undefined,
+        isUser: true,
+      });
+    }
+    if (createBookingDto.passengers && createBookingDto.passengers.length > 0) {
+      passengersToCreate.push(...createBookingDto.passengers.map(p => ({
+        ...p,
+        isUser: false,
+      })));
+    }
+
+    for (const passengerData of passengersToCreate) {
+      const passenger = queryRunner.manager.create(Passenger, {
+        booking_id: savedBooking.id,
+        first_name: passengerData.firstName,
+        last_name: passengerData.lastName,
+        age: passengerData.age || null,
+        nationality: passengerData.nationality || null,
+        id_passport_number: passengerData.idPassportNumber || null,
+        id_type: passengerData.idType || null,
+        is_user: passengerData.isUser === true,
+      });
+      await queryRunner.manager.save(passenger);
+    }
+
+    return savedBooking;
   }
 
   async findAll(userId?: string): Promise<Booking[]> {

@@ -22,6 +22,8 @@ import { ExperiencesModule } from './modules/experiences/experiences.module';
 import { AircraftModule } from './modules/aircraft/aircraft.module';
 import { SmsModule } from './modules/sms/sms.module';
 import { EmailModule } from './modules/email/email.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { CargoModule } from './modules/cargo/cargo.module';
 import { HealthController } from './health.controller';
 import { User } from './common/entities/user.entity';
 import { CharterDeal } from './common/entities/charter-deal.entity';
@@ -58,6 +60,8 @@ import { TransactionLedger } from './common/entities/transaction-ledger.entity';
 import { ExperienceTemplate } from './common/entities/experience-template.entity';
 import { ExperienceImage } from './common/entities/experience-image.entity';
 import { ExperienceSchedule } from './common/entities/experience-schedule.entity';
+import { Notification } from './common/entities/notification.entity';
+import { CargoShipment } from './common/entities/cargo-shipment.entity';
 
 @Module({
   imports: [
@@ -114,6 +118,8 @@ import { ExperienceSchedule } from './common/entities/experience-schedule.entity
             ExperienceTemplate,
             ExperienceImage,
             ExperienceSchedule,
+            Notification,
+            CargoShipment,
           ],
           synchronize: false,
           logging: false,
@@ -176,6 +182,8 @@ import { ExperienceSchedule } from './common/entities/experience-schedule.entity
     SmsModule,
     EmailModule,
     AircraftModule,
+    NotificationsModule,
+    CargoModule,
   ],
   controllers: [HealthController],
 })

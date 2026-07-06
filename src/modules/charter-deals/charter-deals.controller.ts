@@ -88,9 +88,6 @@ export class CharterDealsController {
   ) {
     const pageNum = parseInt(page, 10);
     const limitNum = parseInt(limit, 10);
-    
-    const fromDateObj = fromDate ? new Date(fromDate) : undefined;
-    const toDateObj = toDate ? new Date(toDate) : undefined;
 
     // Use enhanced filters if any new parameters are provided
     const hasEnhancedFilters = aircraftTypeImagePlaceholderId || origin || destination || userLat || userLng || groupBy;
@@ -119,8 +116,8 @@ export class CharterDealsController {
         limitNum,
         search,
         dealType,
-        fromDateObj,
-        toDateObj,
+        fromDate,
+        toDate,
       );
 
       return {
@@ -335,17 +332,14 @@ export class CharterDealsController {
   ) {
     const pageNum = parseInt(page, 10);
     const limitNum = parseInt(limit, 10);
-    
-    const fromDateObj = fromDate ? new Date(fromDate) : undefined;
-    const toDateObj = toDate ? new Date(toDate) : undefined;
 
     const result = await this.charterDealsService.findByRoute(
       origin,
       destination,
       pageNum,
       limitNum,
-      fromDateObj,
-      toDateObj,
+      fromDate,
+      toDate,
     );
 
     return {

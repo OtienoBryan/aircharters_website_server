@@ -12,6 +12,8 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { PassengerIdType } from '../../../common/entities/passenger.entity';
+import { PaymentProviderType } from '../../payments/interfaces/payment-provider.interface';
 // import { PaymentMethod } from '../../../common/entities/booking.entity'; // Not in database
 
 export class PassengerDataDto {
@@ -41,6 +43,11 @@ export class PassengerDataDto {
   @IsOptional()
   @IsString()
   idPassportNumber?: string;
+
+  @ApiPropertyOptional({ enum: PassengerIdType })
+  @IsOptional()
+  @IsEnum(PassengerIdType)
+  idType?: PassengerIdType;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -79,6 +86,14 @@ export class CreateBookingDto {
   @IsOptional()
   @IsString()
   billingRegion?: string;
+
+  @ApiPropertyOptional({
+    enum: PaymentProviderType,
+    description: 'Payment gateway to create the payment intent with. Defaults to Paystack.',
+  })
+  @IsOptional()
+  @IsEnum(PaymentProviderType)
+  paymentProvider?: PaymentProviderType;
 
   // @ApiPropertyOptional()
   // @IsOptional()

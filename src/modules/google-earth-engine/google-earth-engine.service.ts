@@ -9,6 +9,13 @@ export class GoogleEarthEngineService {
   private readonly apiKey: string;
   private readonly baseUrl = 'https://maps.googleapis.com/maps/api';
 
+  // Free, no-card-required fallback for place search when Google Places is
+  // unavailable (e.g. billing not yet enabled on the Google Cloud project).
+  // Same GoogleEarthEngineLocationDto shape is returned either way, so
+  // callers never need to know which provider actually answered.
+  private readonly locationIqApiKey: string;
+  private readonly locationIqBaseUrl = 'https://api.locationiq.com/v1';
+
   // Place coordinates are effectively static, so search results are cached
   // in-process to avoid repeated external API round-trips for the same query
   // (e.g. the same route names appearing across many charter deals/listings).
@@ -21,11 +28,12 @@ export class GoogleEarthEngineService {
     private readonly configService: ConfigService,
   ) {
     this.apiKey = this.configService.get<string>('GOOGLE_MAPS_API_KEY');
+    this.locationIqApiKey = this.configService.get<string>('LOCATIONIQ_API_KEY');
   }
 
   async searchLocations(searchDto: GoogleEarthEngineSearchDto): Promise<GoogleEarthEngineLocationDto[]> {
-    if (!this.apiKey) {
-      throw new HttpException('Google Maps API key not configured', HttpStatus.SERVICE_UNAVAILABLE);
+    if (!this.apiKey && !this.locationIqApiKey) {
+      throw new HttpException('No location search provider configured', HttpStatus.SERVICE_UNAVAILABLE);
     }
 
     const cacheKey = JSON.stringify({
@@ -59,42 +67,93 @@ export class GoogleEarthEngineService {
   }
 
   private async fetchSearchLocations(searchDto: GoogleEarthEngineSearchDto): Promise<GoogleEarthEngineLocationDto[]> {
+    if (this.apiKey) {
+      try {
+        return await this.fetchFromGoogle(searchDto);
+      } catch (error) {
+        if (!this.locationIqApiKey) {
+          throw new HttpException(`Location search failed: ${error.message}`, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+        // Fall through to LocationIQ below (e.g. Google billing not enabled yet).
+      }
+    }
+
+    if (this.locationIqApiKey) {
+      return this.fetchFromLocationIq(searchDto);
+    }
+
+    throw new HttpException('Location search failed: no provider available', HttpStatus.SERVICE_UNAVAILABLE);
+  }
+
+  private async fetchFromGoogle(searchDto: GoogleEarthEngineSearchDto): Promise<GoogleEarthEngineLocationDto[]> {
+    const response = await firstValueFrom(
+      this.httpService.get(`${this.baseUrl}/place/textsearch/json`, {
+        params: {
+          query: searchDto.query,
+          key: this.apiKey,
+          type: searchDto.type || 'establishment',
+          location: searchDto.location,
+          radius: searchDto.radius || 2000000, // 2000km default for air travel
+        },
+      })
+    );
+
+    // Handle different API response statuses gracefully
+    if (response.data.status === 'ZERO_RESULTS') {
+      // Return empty array instead of throwing error for no results
+      return [];
+    }
+
+    if (response.data.status !== 'OK') {
+      throw new Error(`Google Places API error: ${response.data.status}`);
+    }
+
+    return response.data.results.map(place => ({
+      placeId: place.place_id,
+      name: place.name,
+      formattedAddress: place.formatted_address,
+      location: {
+        lat: place.geometry.location.lat,
+        lng: place.geometry.location.lng,
+      },
+      types: place.types,
+      rating: place.rating,
+      userRatingsTotal: place.user_ratings_total,
+    }));
+  }
+
+  private async fetchFromLocationIq(searchDto: GoogleEarthEngineSearchDto): Promise<GoogleEarthEngineLocationDto[]> {
     try {
       const response = await firstValueFrom(
-        this.httpService.get(`${this.baseUrl}/place/textsearch/json`, {
+        this.httpService.get(`${this.locationIqBaseUrl}/autocomplete`, {
           params: {
-            query: searchDto.query,
-            key: this.apiKey,
-            type: searchDto.type || 'establishment',
-            location: searchDto.location,
-            radius: searchDto.radius || 2000000, // 2000km default for air travel
+            key: this.locationIqApiKey,
+            q: searchDto.query,
+            format: 'json',
+            limit: 8,
           },
         })
       );
 
-      // Handle different API response statuses gracefully
-      if (response.data.status === 'ZERO_RESULTS') {
-        // Return empty array instead of throwing error for no results
+      const results = Array.isArray(response.data) ? response.data : [];
+      return results
+        .filter((place: any) => place.lat != null && place.lon != null)
+        .map((place: any) => ({
+          placeId: String(place.place_id),
+          name: place.display_place || place.display_name?.split(',')[0] || place.display_name,
+          formattedAddress: place.display_name,
+          location: {
+            lat: parseFloat(place.lat),
+            lng: parseFloat(place.lon),
+          },
+          types: place.type ? [place.type] : undefined,
+        }));
+    } catch (error) {
+      // LocationIQ responds 404 for "no results" - treat that as an empty
+      // list rather than an error, matching Google's ZERO_RESULTS behavior.
+      if (error?.response?.status === 404) {
         return [];
       }
-
-      if (response.data.status !== 'OK') {
-        throw new HttpException(`Google Places API error: ${response.data.status}`, HttpStatus.BAD_REQUEST);
-      }
-
-      return response.data.results.map(place => ({
-        placeId: place.place_id,
-        name: place.name,
-        formattedAddress: place.formatted_address,
-        location: {
-          lat: place.geometry.location.lat,
-          lng: place.geometry.location.lng,
-        },
-        types: place.types,
-        rating: place.rating,
-        userRatingsTotal: place.user_ratings_total,
-      }));
-    } catch (error) {
       throw new HttpException(`Location search failed: ${error.message}`, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }

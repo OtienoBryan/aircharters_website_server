@@ -114,7 +114,12 @@ export class UsersService {
   }
 
   async changePassword(userId: string, changePasswordDto: ChangePasswordDto): Promise<void> {
-    const user = await this.getUserById(userId);
+    // password column is select:false by default, so re-add it explicitly
+    const user = await this.userRepository
+      .createQueryBuilder('user')
+      .addSelect('user.password')
+      .where('user.id = :userId', { userId })
+      .getOne();
     if (!user) {
       throw new NotFoundException('User not found');
     }
@@ -135,7 +140,12 @@ export class UsersService {
   }
 
   async deleteAccount(userId: string, deleteAccountDto: DeleteAccountDto): Promise<void> {
-    const user = await this.getUserById(userId);
+    // password column is select:false by default, so re-add it explicitly
+    const user = await this.userRepository
+      .createQueryBuilder('user')
+      .addSelect('user.password')
+      .where('user.id = :userId', { userId })
+      .getOne();
     if (!user) {
       throw new NotFoundException('User not found');
     }

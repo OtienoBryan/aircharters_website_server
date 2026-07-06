@@ -44,6 +44,20 @@ export class Aircraft {
   @Column({ name: 'cruiseSpeedKnots', type: 'int', nullable: true })
   cruiseSpeedKnots: number | null;
 
+  // Real published cruise speed spec (knots), shown on the aircraft detail page.
+  @Column({ type: 'int', nullable: true })
+  cruiseSpeed: number | null;
+
+  // Range in nautical miles.
+  @Column({ type: 'int', nullable: true })
+  range: number | null;
+
+  @Column({ type: 'decimal', precision: 6, scale: 2, nullable: true })
+  height: number | null;
+
+  @Column({ type: 'decimal', precision: 6, scale: 2, nullable: true })
+  width: number | null;
+
   @Column({ name: 'isAvailable', type: 'boolean', default: true })
   isAvailable: boolean;
 

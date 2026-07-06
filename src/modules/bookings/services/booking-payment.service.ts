@@ -8,6 +8,21 @@ import { User } from '../../../common/entities/user.entity';
 import { Payment, PaymentMethod, PaymentStatus as PaymentEntityStatus } from '../../../common/entities/payment.entity';
 import { UserTrip, UserTripStatus } from '../../../common/entities/user-trips.entity';
 import { WalletService } from '../../wallet/wallet.service';
+import { NotificationsService } from '../../notifications/notifications.service';
+import { NotificationType } from '../../../common/entities/notification.entity';
+import { EmailService } from '../../email/email.service';
+import { BookingDocumentService } from './booking-document.service';
+
+const BOOKING_TYPE_LABELS: Record<string, string> = {
+  direct: 'Private Charter',
+  deal: 'Empty Leg Deal',
+  experience: 'Experience',
+  medivac: 'Medical Evacuation',
+};
+
+function bookingTypeLabel(type: string | null | undefined): string {
+  return BOOKING_TYPE_LABELS[String(type || '').toLowerCase()] || 'Charter Booking';
+}
 
 @Injectable()
 export class BookingPaymentService {
@@ -25,6 +40,9 @@ export class BookingPaymentService {
     @InjectRepository(UserTrip)
     private readonly userTripRepository: Repository<UserTrip>,
     private readonly walletService: WalletService,
+    private readonly notificationsService: NotificationsService,
+    private readonly emailService: EmailService,
+    private readonly bookingDocumentService: BookingDocumentService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -112,6 +130,7 @@ export class BookingPaymentService {
       booking.paymentStatus = PaymentStatus.PAID;
       // booking.paymentTransactionId = paymentTransactionId; // Not in database
       booking.bookingStatus = BookingStatus.CONFIRMED;
+      booking.createdAt = new Date();
 
       // Calculate and populate loyalty points only when payment is made
       const loyaltyPointsToEarn = Math.floor(amount * 5); // 1 USD = 5 miles
@@ -122,6 +141,7 @@ export class BookingPaymentService {
 
       // Create payment record
       const payment = queryRunner.manager.create(Payment, {
+        id: `payment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         userId: booking.userId,
         companyId: booking.companyId,
         bookingId: booking.id.toString(),
@@ -138,6 +158,7 @@ export class BookingPaymentService {
 
       // Create user trip record
       const userTrip = queryRunner.manager.create(UserTrip, {
+        id: `trip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         userId: booking.userId,
         bookingId: booking.id.toString(),
         status: UserTripStatus.UPCOMING,
@@ -194,6 +215,87 @@ export class BookingPaymentService {
           console.error('Failed to process loyalty points:', walletError);
           // You might want to create a background job to retry this later
         }
+      }
+
+      // Surface the confirmation in the account notifications inbox - best
+      // effort, must never fail the payment that already succeeded.
+      try {
+        await this.notificationsService.create(
+          booking.userId,
+          'Booking confirmed',
+          `Your booking ${booking.referenceNumber} is confirmed. Payment of $${amount} received` +
+            (loyaltyPointsToEarn > 0 ? ` and ${loyaltyPointsToEarn} miles earned.` : '.'),
+          NotificationType.BOOKING,
+          booking.id,
+        );
+      } catch (notificationError) {
+        console.error('Failed to create booking confirmation notification:', notificationError);
+      }
+
+      // Email the client (payment confirmation + booking confirmation with the
+      // e-ticket PDF) and notify the operator (charters_companies.email). Best
+      // effort outside the transaction - must never fail the payment itself.
+      try {
+        // Re-fetch with the relations the PDF/email templates need.
+        const fullBooking = await this.bookingRepository.findOne({
+          where: { id: booking.id },
+          relations: ['user', 'company', 'deal', 'deal.aircraft', 'aircraft', 'passengers'],
+        });
+
+        if (fullBooking) {
+          const typeLabel = bookingTypeLabel(fullBooking.bookingType);
+          const clientName = `${fullBooking.user?.first_name || ''} ${fullBooking.user?.last_name || ''}`.trim() || 'Traveler';
+          const departureLabel = fullBooking.departureDateTime
+            ? new Date(fullBooking.departureDateTime).toLocaleString()
+            : ((fullBooking as any).deal?.date ? new Date((fullBooking as any).deal.date).toLocaleDateString() : 'TBA');
+          const aircraftName = (fullBooking as any).deal?.aircraft?.name || (fullBooking as any).aircraft?.name || 'N/A';
+
+          if (fullBooking.user?.email) {
+            // 1. Payment confirmation
+            await this.emailService.sendPaymentConfirmationToClient(fullBooking.user.email, {
+              referenceNumber: fullBooking.referenceNumber,
+              bookingType: typeLabel,
+              amount,
+              paymentMethod,
+              transactionId: paymentTransactionId,
+            });
+
+            // 2. Booking confirmation with e-ticket PDF attached
+            let pdfBuffer: Buffer | undefined;
+            try {
+              pdfBuffer = await this.bookingDocumentService.generateETicketBuffer(fullBooking);
+            } catch (pdfError) {
+              console.error('Failed to generate e-ticket PDF for confirmation email:', pdfError);
+            }
+
+            await this.emailService.sendBookingConfirmationToClient(fullBooking.user.email, {
+              referenceNumber: fullBooking.referenceNumber,
+              bookingType: typeLabel,
+              passengerName: clientName,
+              originName: fullBooking.originName || (fullBooking as any).deal?.originName || 'N/A',
+              destinationName: fullBooking.destinationName || (fullBooking as any).deal?.destinationName || 'N/A',
+              departureDateTime: departureLabel,
+              aircraft: aircraftName,
+              totalAmount: Number(fullBooking.totalPrice) || amount,
+            }, pdfBuffer);
+          }
+
+          // 3. Operator notification (no client email included)
+          if (fullBooking.company?.email) {
+            await this.emailService.sendPaymentConfirmationToOperator(fullBooking.company.email, {
+              referenceNumber: fullBooking.referenceNumber,
+              bookingType: typeLabel,
+              clientName,
+              originName: fullBooking.originName || (fullBooking as any).deal?.originName || 'N/A',
+              destinationName: fullBooking.destinationName || (fullBooking as any).deal?.destinationName || 'N/A',
+              departureDateTime: departureLabel,
+              amount,
+              paymentMethod,
+            });
+          }
+        }
+      } catch (emailError) {
+        console.error('Failed to send payment confirmation emails:', emailError);
       }
 
       return booking;

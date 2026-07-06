@@ -22,6 +22,10 @@ export interface AircraftListItem {
   capacity: number;
   pricePerHour: number | null;
   cruiseSpeedKnots: number | null;
+  cruiseSpeed: number | null;
+  range: number | null;
+  height: number | null;
+  width: number | null;
   maxLuggageCapacity: number | null;
   isAvailable: boolean;
   baseAirport: string | null;
@@ -149,6 +153,10 @@ export class AircraftService {
         'aircraft.capacity AS capacity',
         'aircraft.pricePerHour AS pricePerHour',
         'aircraft.cruiseSpeedKnots AS cruiseSpeedKnots',
+        'aircraft.cruiseSpeed AS cruiseSpeed',
+        'aircraft.range AS `range`',
+        'aircraft.height AS height',
+        'aircraft.width AS width',
         'aircraft.maxLuggageCapacity AS maxLuggageCapacity',
         'aircraft.serviceType AS serviceType',
         'aircraft.isAvailable AS isAvailable',
@@ -178,6 +186,10 @@ export class AircraftService {
       capacity: row.capacity,
       pricePerHour: row.pricePerHour,
       cruiseSpeedKnots: row.cruiseSpeedKnots,
+      cruiseSpeed: row.cruiseSpeed,
+      range: row.range,
+      height: row.height,
+      width: row.width,
       maxLuggageCapacity: row.maxLuggageCapacity,
       serviceType: row.serviceType,
       isAvailable: Boolean(row.isAvailable) && row.maintenanceStatus === 'operational',

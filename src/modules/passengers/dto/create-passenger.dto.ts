@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsOptional, IsInt, Min, Max, Length } from 'class-validator';
+import { IsString, IsOptional, IsInt, IsEnum, Min, Max, Length } from 'class-validator';
+import { PassengerIdType } from '../../../common/entities/passenger.entity';
 
 export class CreatePassengerDto {
   @ApiProperty({
@@ -63,4 +64,13 @@ export class CreatePassengerDto {
   @IsString()
   @Length(1, 100)
   idPassportNumber?: string;
-} 
+
+  @ApiProperty({
+    description: 'Type of identification document the number belongs to',
+    enum: PassengerIdType,
+    required: false,
+  })
+  @IsOptional()
+  @IsEnum(PassengerIdType)
+  idType?: PassengerIdType;
+}

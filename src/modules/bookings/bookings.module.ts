@@ -14,9 +14,11 @@ import { Payment } from '../../common/entities/payment.entity';
 import { WalletModule } from '../wallet/wallet.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { EmailModule } from '../email/email.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { BookingPaymentService } from './services/booking-payment.service';
 import { BookingTimelineService } from './services/booking-timeline.service';
 import { BookingQueryService } from './services/booking-query.service';
+import { BookingDocumentService } from './services/booking-document.service';
 
 @Module({
   imports: [
@@ -24,6 +26,7 @@ import { BookingQueryService } from './services/booking-query.service';
     WalletModule,
     PaymentsModule, // Import PaymentsModule to access PaymentProviderService
     EmailModule, // Import EmailModule to access EmailService
+    NotificationsModule,
   ],
   controllers: [BookingsController],
   providers: [
@@ -31,6 +34,7 @@ import { BookingQueryService } from './services/booking-query.service';
     BookingPaymentService,
     BookingTimelineService,
     BookingQueryService,
+    BookingDocumentService,
   ],
   exports: [BookingsService],
 })

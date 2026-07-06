@@ -1,6 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
+import * as fs from 'fs';
+import * as path from 'path';
+import { Resend } from 'resend';
+
+const BRAND_ORANGE = '#f97316';
+const BRAND_ORANGE_DARK = '#ea580c';
+const LOGO_CID = 'aircharters-logo';
 
 @Injectable()
 export class EmailService {
@@ -9,12 +16,21 @@ export class EmailService {
   private mailtrapBaseUrl = 'https://send.api.mailtrap.io/api/send';
   private infobipApiKey: string;
   private infobipBaseUrl: string;
+  private resend: Resend | null = null;
+  private logoBuffer: Buffer | null | undefined; // undefined = not loaded, null = unavailable
 
   constructor(private configService: ConfigService) {
     this.mailtrapApiKey = this.configService.get<string>('MAILTRAP_API_KEY');
     this.infobipApiKey = this.configService.get<string>('INFOBIP_API_KEY');
     this.infobipBaseUrl = this.configService.get<string>('INFOBIP_BASE_URL') || 'https://rpdjky.api.infobip.com';
-    
+
+    const resendApiKey = this.configService.get<string>('RESEND_API_KEY');
+    if (resendApiKey) {
+      this.resend = new Resend(resendApiKey);
+    } else {
+      this.logger.warn('RESEND_API_KEY not configured. Payment confirmation emails via Resend will be disabled.');
+    }
+
     if (!this.mailtrapApiKey && !this.infobipApiKey) {
       this.logger.warn('Neither MAILTRAP_API_KEY nor INFOBIP_API_KEY configured. Email service will be disabled.');
       return;
@@ -100,9 +116,424 @@ export class EmailService {
       };
     } catch (error) {
       this.logger.error(`Failed to send payment confirmation email to ${to}:`, error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /** Load the AirCharters logo once (cached) for inline email embedding. */
+  private getLogoBuffer(): Buffer | null {
+    if (this.logoBuffer !== undefined) return this.logoBuffer;
+    try {
+      this.logoBuffer = fs.readFileSync(path.join(process.cwd(), 'assets', 'logo.png'));
+    } catch (err) {
+      this.logger.warn(`Email logo not found, sending without inline logo: ${err.message}`);
+      this.logoBuffer = null;
+    }
+    return this.logoBuffer;
+  }
+
+  /** Inline logo attachment (referenced via cid) if the logo file is available. */
+  private logoAttachment() {
+    const logo = this.getLogoBuffer();
+    return logo ? [{ filename: 'logo.png', content: logo, contentId: LOGO_CID }] : [];
+  }
+
+  /**
+   * Wraps email body content in the branded AirCharters shell: orange header
+   * with logo, white content card, footer.
+   */
+  private brandedShell(opts: { title: string; subtitle: string; bodyHtml: string }): string {
+    const logo = this.getLogoBuffer();
+    const logoImg = logo
+      ? `<img src="cid:${LOGO_CID}" alt="Air Charters" width="72" height="72" style="width:72px;height:72px;border-radius:14px;display:block;margin:0 auto 14px;" />`
+      : '';
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${opts.title}</title>
+      </head>
+      <body style="margin:0;padding:0;background:#f5f7fa;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+        <div style="max-width:600px;margin:0 auto;padding:32px 16px;">
+          <div style="background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.06);">
+            <div style="background:linear-gradient(135deg,${BRAND_ORANGE} 0%,${BRAND_ORANGE_DARK} 100%);padding:32px 24px;text-align:center;">
+              ${logoImg}
+              <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:800;letter-spacing:-0.3px;">${opts.title}</h1>
+              <p style="margin:6px 0 0;color:rgba(255,255,255,0.9);font-size:14px;">${opts.subtitle}</p>
+            </div>
+            <div style="padding:32px 28px;color:#1a202c;">
+              ${opts.bodyHtml}
+            </div>
+            <div style="padding:20px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;text-align:center;">
+              <p style="margin:0;color:#94a3b8;font-size:12px;">This is an automated email. Please do not reply to this message.</p>
+              <p style="margin:6px 0 0;color:#94a3b8;font-size:12px;">© ${new Date().getFullYear()} Air Charters. All rights reserved.</p>
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  private detailTable(rows: Array<[string, string]>): string {
+    return `
+      <table style="width:100%;border-collapse:collapse;margin:8px 0 4px;">
+        ${rows.map(([label, value]) => `
+          <tr>
+            <td style="padding:11px 0;border-bottom:1px solid #edf2f7;color:#64748b;font-size:13px;font-weight:600;">${label}</td>
+            <td style="padding:11px 0;border-bottom:1px solid #edf2f7;color:#1a202c;font-size:13px;font-weight:600;text-align:right;">${value}</td>
+          </tr>
+        `).join('')}
+      </table>
+    `;
+  }
+
+  private amountBanner(amount: number): string {
+    return `
+      <div style="background:${BRAND_ORANGE};color:#ffffff;padding:16px;border-radius:10px;text-align:center;font-size:18px;font-weight:800;margin:24px 0;">
+        Amount Paid: $${amount.toFixed(2)} USD
+      </div>
+    `;
+  }
+
+  /**
+   * Sent to the traveler via Resend once their booking payment succeeds.
+   */
+  async sendPaymentConfirmationToClient(
+    to: string,
+    data: {
+      referenceNumber: string;
+      bookingType: string;
+      amount: number;
+      paymentMethod: string;
+      transactionId: string;
+    }
+  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    if (!this.resend) {
+      this.logger.error('Resend not initialized. Check RESEND_API_KEY configuration.');
+      return { success: false, error: 'Email service not configured' };
+    }
+
+    try {
+      const html = this.brandedShell({
+        title: 'Payment Confirmed',
+        subtitle: 'Your payment has been processed successfully',
+        bodyHtml: `
+          <p style="font-size:15px;color:#4a5568;margin:0 0 20px;">Thank you! We've received your payment. Here are the details:</p>
+          ${this.detailTable([
+            ['Booking Reference', data.referenceNumber],
+            ['Booking Type', data.bookingType],
+            ['Transaction ID', data.transactionId],
+            ['Payment Method', data.paymentMethod],
+          ])}
+          ${this.amountBanner(data.amount)}
+          <p style="font-size:14px;color:#4a5568;margin:0;">A separate email with your e-ticket is on its way.</p>
+        `,
+      });
+
+      const result = await this.resend.emails.send({
+        from: 'Air Charters <admin@aircharterss.com>',
+        to: [to],
+        subject: `Payment Confirmed - ${data.referenceNumber}`,
+        html,
+        attachments: this.logoAttachment(),
+      });
+
+      if (result.error) {
+        throw new Error(result.error.message);
+      }
+
+      this.logger.log(`Payment confirmation email sent to client ${to}. Message ID: ${result.data?.id}`);
+      return { success: true, messageId: result.data?.id };
+    } catch (error) {
+      this.logger.error(`Failed to send payment confirmation email to client ${to}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
+   * Sent to the traveler with their e-ticket PDF attached once payment succeeds.
+   */
+  async sendBookingConfirmationToClient(
+    to: string,
+    data: {
+      referenceNumber: string;
+      bookingType: string;
+      passengerName: string;
+      originName: string;
+      destinationName: string;
+      departureDateTime: string;
+      aircraft: string;
+      totalAmount: number;
+    },
+    pdfBuffer?: Buffer
+  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    if (!this.resend) {
+      this.logger.error('Resend not initialized. Check RESEND_API_KEY configuration.');
+      return { success: false, error: 'Email service not configured' };
+    }
+
+    try {
+      const html = this.brandedShell({
+        title: 'Booking Confirmed!',
+        subtitle: 'Your flight is booked — e-ticket attached',
+        bodyHtml: `
+          <p style="font-size:15px;color:#4a5568;margin:0 0 20px;">Dear ${data.passengerName}, great news — your booking is confirmed. Your e-ticket is attached to this email as a PDF.</p>
+          ${this.detailTable([
+            ['Booking Reference', data.referenceNumber],
+            ['Booking Type', data.bookingType],
+            ['Route', `${data.originName} → ${data.destinationName}`],
+            ['Departure', data.departureDateTime],
+            ['Aircraft', data.aircraft],
+          ])}
+          <div style="background:${BRAND_ORANGE};color:#ffffff;padding:16px;border-radius:10px;text-align:center;font-size:18px;font-weight:800;margin:24px 0;">
+            Total: $${data.totalAmount.toFixed(2)} USD
+          </div>
+          <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:16px 18px;margin-top:8px;">
+            <p style="margin:0 0 6px;font-weight:700;color:#9a3412;font-size:14px;">Before you fly</p>
+            <ul style="margin:0;padding-left:18px;color:#9a3412;font-size:13px;line-height:1.7;">
+              <li>Arrive at least 30 minutes before departure</li>
+              <li>Bring a valid ID and your booking reference</li>
+              <li>Your e-ticket PDF is attached to this email</li>
+            </ul>
+          </div>
+        `,
+      });
+
+      const attachments: any[] = [...this.logoAttachment()];
+      if (pdfBuffer) {
+        attachments.push({
+          filename: `e-ticket-${data.referenceNumber}.pdf`,
+          content: pdfBuffer,
+        });
+      }
+
+      const result = await this.resend.emails.send({
+        from: 'Air Charters <admin@aircharterss.com>',
+        to: [to],
+        subject: `Booking Confirmed - ${data.referenceNumber}`,
+        html,
+        attachments,
+      });
+
+      if (result.error) {
+        throw new Error(result.error.message);
+      }
+
+      this.logger.log(`Booking confirmation email (with e-ticket) sent to client ${to}. Message ID: ${result.data?.id}`);
+      return { success: true, messageId: result.data?.id };
+    } catch (error) {
+      this.logger.error(`Failed to send booking confirmation email to client ${to}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
+   * Sent to the charter operator (charters_companies.email) once a client's
+   * booking payment succeeds. Deliberately excludes the client's email address.
+   */
+  async sendPaymentConfirmationToOperator(
+    to: string,
+    data: {
+      referenceNumber: string;
+      bookingType: string;
+      clientName: string;
+      originName: string;
+      destinationName: string;
+      departureDateTime: string;
+      amount: number;
+      paymentMethod: string;
+    }
+  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    if (!this.resend) {
+      this.logger.error('Resend not initialized. Check RESEND_API_KEY configuration.');
+      return { success: false, error: 'Email service not configured' };
+    }
+
+    try {
+      const html = this.brandedShell({
+        title: 'New Paid Booking',
+        subtitle: 'A client has paid for a charter booking',
+        bodyHtml: `
+          <p style="font-size:15px;color:#4a5568;margin:0 0 20px;">A client has just completed payment for a booking on your fleet. Please prepare for the flight below.</p>
+          ${this.detailTable([
+            ['Reference', data.referenceNumber],
+            ['Booking Type', data.bookingType],
+            ['Client', data.clientName],
+            ['Route', `${data.originName} → ${data.destinationName}`],
+            ['Departure', data.departureDateTime],
+            ['Payment Method', data.paymentMethod],
+          ])}
+          ${this.amountBanner(data.amount)}
+          <p style="font-size:14px;color:#4a5568;margin:0;">Please log in to your operator dashboard for full booking and passenger details.</p>
+        `,
+      });
+
+      const result = await this.resend.emails.send({
+        from: 'Air Charters <admin@aircharterss.com>',
+        to: [to],
+        subject: `New Paid Booking - ${data.referenceNumber}`,
+        html,
+        attachments: this.logoAttachment(),
+      });
+
+      if (result.error) {
+        throw new Error(result.error.message);
+      }
+
+      this.logger.log(`Payment notification email sent to operator ${to}. Message ID: ${result.data?.id}`);
+      return { success: true, messageId: result.data?.id };
+    } catch (error) {
+      this.logger.error(`Failed to send payment notification email to operator ${to}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
+   * Sent to the client right after they submit a charter quote request, so
+   * they know it went through and what happens next.
+   */
+  async sendQuoteRequestConfirmationToClient(
+    to: string,
+    data: {
+      referenceNumber: string;
+      bookingType: string;
+      clientName: string;
+      originName: string;
+      destinationName: string;
+      departureDateTime: string;
+      aircraftName: string;
+    }
+  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    if (!this.resend) {
+      this.logger.error('Resend not initialized. Check RESEND_API_KEY configuration.');
+      return { success: false, error: 'Email service not configured' };
+    }
+
+    try {
+      const html = this.brandedShell({
+        title: 'Quote Request Received',
+        subtitle: "We're on it — a price is on the way",
+        bodyHtml: `
+          <p style="font-size:15px;color:#4a5568;margin:0 0 20px;">Dear ${data.clientName}, thank you for your charter request. Our team is reviewing it now and will send you a price shortly.</p>
+          ${this.detailTable([
+            ['Reference', data.referenceNumber],
+            ['Booking Type', data.bookingType],
+            ['Route', `${data.originName} → ${data.destinationName}`],
+            ['Departure', data.departureDateTime],
+            ['Aircraft', data.aircraftName],
+          ])}
+          <p style="font-size:14px;color:#4a5568;margin:0;">You'll receive another email as soon as AirCharters submits a quote for this trip.</p>
+        `,
+      });
+
+      const result = await this.resend.emails.send({
+        from: 'Air Charters <admin@aircharterss.com>',
+        to: [to],
+        subject: `Quote Request Received - ${data.referenceNumber}`,
+        html,
+        attachments: this.logoAttachment(),
+      });
+
+      if (result.error) {
+        throw new Error(result.error.message);
+      }
+
+      this.logger.log(`Quote request confirmation sent to client ${to}. Message ID: ${result.data?.id}`);
+      return { success: true, messageId: result.data?.id };
+    } catch (error) {
+      this.logger.error(`Failed to send quote request confirmation to client ${to}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
+   * Sent to the operator (charters_companies.email) when a client requests a
+   * quote, prompting them to log in and post a price. Deliberately excludes
+   * the client's email address.
+   */
+  async sendQuoteRequestNotificationToOperator(
+    to: string,
+    data: {
+      referenceNumber: string;
+      bookingType: string;
+      clientName: string;
+      originName: string;
+      destinationName: string;
+      departureDateTime: string;
+      passengerCount: number;
+      aircraftName: string;
+      specialRequests?: string | null;
+    }
+  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    if (!this.resend) {
+      this.logger.error('Resend not initialized. Check RESEND_API_KEY configuration.');
+      return { success: false, error: 'Email service not configured' };
+    }
+
+    try {
+      const rows: Array<[string, string]> = [
+        ['Reference', data.referenceNumber],
+        ['Booking Type', data.bookingType],
+        ['Client', data.clientName],
+        ['Route', `${data.originName} → ${data.destinationName}`],
+        ['Departure', data.departureDateTime],
+        ['Aircraft', data.aircraftName],
+        ['Passengers', String(data.passengerCount)],
+      ];
+      if (data.specialRequests) {
+        rows.push(['Special Requests', data.specialRequests]);
+      }
+
+      const html = this.brandedShell({
+        title: 'New Quote Request',
+        subtitle: 'Action needed: submit your quote',
+        bodyHtml: `
+          <p style="font-size:15px;color:#4a5568;margin:0 0 20px;">A client has requested a charter quote for one of your aircraft. Please review the details below.</p>
+          ${this.detailTable(rows)}
+          <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:16px 18px;margin-top:20px;">
+            <p style="margin:0 0 6px;font-weight:700;color:#9a3412;font-size:14px;">Action required</p>
+            <p style="margin:0;color:#9a3412;font-size:13px;line-height:1.6;">Log in to your AirCharters operator dashboard to post a price quote for this request. The client is waiting to hear back from you.</p>
+          </div>
+        `,
+      });
+
+      const result = await this.resend.emails.send({
+        from: 'Air Charters <admin@aircharterss.com>',
+        to: [to],
+        subject: `New Quote Request - ${data.referenceNumber}`,
+        html,
+        attachments: this.logoAttachment(),
+      });
+
+      if (result.error) {
+        throw new Error(result.error.message);
+      }
+
+      this.logger.log(`Quote request notification sent to operator ${to}. Message ID: ${result.data?.id}`);
+      return { success: true, messageId: result.data?.id };
+    } catch (error) {
+      this.logger.error(`Failed to send quote request notification to operator ${to}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
   }
