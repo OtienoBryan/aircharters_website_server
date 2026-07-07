@@ -17,6 +17,9 @@ export class CharterDeal {
   @Column({ name: 'originName', type: 'varchar', length: 255 })
   originName: string;
 
+  @Column({ name: 'originDisplayName', type: 'varchar', length: 255, nullable: true })
+  originDisplayName: string | null;
+
   @Column({ name: 'originLatitude', type: 'decimal', precision: 10, scale: 8, nullable: true })
   originLatitude: number;
 
@@ -25,6 +28,9 @@ export class CharterDeal {
 
   @Column({ name: 'destinationName', type: 'varchar', length: 255 })
   destinationName: string;
+
+  @Column({ name: 'destinationDisplayName', type: 'varchar', length: 255, nullable: true })
+  destinationDisplayName: string | null;
 
   @Column({ name: 'destinationLatitude', type: 'decimal', precision: 10, scale: 8, nullable: true })
   destinationLatitude: number;
@@ -46,6 +52,9 @@ export class CharterDeal {
 
   @Column({ type: 'int' })
   availableSeats: number;
+
+  @Column({ name: 'estimatedFlightTimeMinutes', type: 'int', nullable: true })
+  estimatedFlightTimeMinutes: number | null;
 
   @Column({ name: 'pilotId', type: 'int', nullable: true })
   pilotId: number;

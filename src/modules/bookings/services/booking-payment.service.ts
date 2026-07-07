@@ -289,7 +289,9 @@ export class BookingPaymentService {
               originName: fullBooking.originName || (fullBooking as any).deal?.originName || 'N/A',
               destinationName: fullBooking.destinationName || (fullBooking as any).deal?.destinationName || 'N/A',
               departureDateTime: departureLabel,
-              amount,
+              // Always the booking's stored USD price, never the raw payment
+              // amount (which may arrive in a locally-converted currency).
+              amount: Number(fullBooking.totalPrice) || amount,
               paymentMethod,
             });
           }

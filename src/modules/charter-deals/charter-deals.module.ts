@@ -6,6 +6,7 @@ import { CharterDeal } from '../../common/entities/charter-deal.entity';
 import { ChartersCompany } from '../../common/entities/charters-company.entity';
 import { Aircraft } from '../../common/entities/aircraft.entity';
 import { AircraftTypeImagePlaceholder } from '../../common/entities/aircraft-type-image-placeholder.entity';
+import { Booking } from '../../common/entities/booking.entity';
 import { AmenitiesModule } from '../amenities/amenities.module';
 import { GoogleEarthEngineModule } from '../google-earth-engine/google-earth-engine.module';
 
@@ -16,6 +17,7 @@ import { GoogleEarthEngineModule } from '../google-earth-engine/google-earth-eng
       ChartersCompany,
       Aircraft,
       AircraftTypeImagePlaceholder,
+      Booking,
     ]),
     AmenitiesModule,
     GoogleEarthEngineModule,

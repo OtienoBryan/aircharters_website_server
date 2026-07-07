@@ -6,6 +6,7 @@ import { ChartersCompany } from '../../common/entities/charters-company.entity';
 // FixedRoute import removed - no longer used
 import { Aircraft } from '../../common/entities/aircraft.entity';
 import { AircraftTypeImagePlaceholder } from '../../common/entities/aircraft-type-image-placeholder.entity';
+import { Booking } from '../../common/entities/booking.entity';
 import { AmenitiesService } from '../amenities/amenities.service';
 import { GoogleEarthEngineService } from '../google-earth-engine/google-earth-engine.service';
 import { FilterCharterDealsDto } from './dto/filter-charter-deals.dto';
@@ -60,9 +61,46 @@ export class CharterDealsService {
     private aircraftRepository: Repository<Aircraft>,
     @InjectRepository(AircraftTypeImagePlaceholder)
     private aircraftTypeImagePlaceholderRepository: Repository<AircraftTypeImagePlaceholder>,
+    @InjectRepository(Booking)
+    private bookingRepository: Repository<Booking>,
     private amenitiesService: AmenitiesService,
     private googleEarthEngineService: GoogleEarthEngineService,
   ) {}
+
+  // Seats already claimed by non-cancelled bookings against a deal. Per-booking
+  // seat count prefers the real passenger roster (charter_passengers), falling
+  // back to the adults+children totals, and finally to 1 seat so an in-progress
+  // booking (passengers/pax not filled in yet) still holds its slot.
+  private async getBookedSeatsByDealId(dealIds: number[]): Promise<Map<number, number>> {
+    const uniqueIds = [...new Set(dealIds.filter((id) => Number.isFinite(id)))];
+    if (uniqueIds.length === 0) return new Map();
+
+    const rows: Array<{ dealId: number; bookedSeats: string }> = await this.bookingRepository.query(
+      `SELECT b.dealId AS dealId,
+              SUM(GREATEST(COALESCE(pax.paxCount, 0), b.totalAdults + b.totalChildren, 1)) AS bookedSeats
+       FROM charter_bookings b
+       LEFT JOIN (
+         SELECT booking_id, COUNT(*) AS paxCount FROM charter_passengers GROUP BY booking_id
+       ) pax ON pax.booking_id = b.id
+       WHERE b.dealId IN (?) AND b.bookingStatus != 'cancelled'
+       GROUP BY b.dealId`,
+      [uniqueIds],
+    );
+
+    return new Map(rows.map((row) => [Number(row.dealId), Number(row.bookedSeats) || 0]));
+  }
+
+  // Deducts booked seats from the deal's configured availableSeats so listings
+  // never show a seat count that's already been claimed by another booking.
+  private applyRemainingSeats<T extends { id: number; availableSeats: number }>(
+    deals: T[],
+    bookedSeatsByDealId: Map<number, number>,
+  ): T[] {
+    return deals.map((deal) => ({
+      ...deal,
+      availableSeats: Math.max(0, (deal.availableSeats || 0) - (bookedSeatsByDealId.get(deal.id) || 0)),
+    }));
+  }
 
   async findAllWithRelations(
     page: number = 1,
@@ -138,12 +176,15 @@ export class CharterDealsService {
         'deal.pricePerSeat',
         'deal.discountPerSeat',
         'deal.availableSeats',
+        'deal.estimatedFlightTimeMinutes',
         'deal.createdAt',
         'deal.updatedAt',
         'company.companyName',
         'company.logo',
         'deal.originName as deal_originName',
+        'deal.originDisplayName as deal_originDisplayName',
         'deal.destinationName as deal_destinationName',
+        'deal.destinationDisplayName as deal_destinationDisplayName',
         'aircraft.name',
         'aircraft.type',
         'aircraft.capacity',
@@ -161,6 +202,7 @@ export class CharterDealsService {
     const amenitiesByAircraft = await this.amenitiesService.getAircraftAmenitiesBatch(
       deals.map((deal) => deal.deal_aircraftId),
     );
+    const bookedSeatsByDealId = await this.getBookedSeatsByDealId(deals.map((deal) => deal.deal_id));
 
     // Transform the raw results to match the interface
     const transformedDeals: CharterDealWithRelations[] = await Promise.all(deals.map(async (deal) => ({
@@ -176,8 +218,8 @@ export class CharterDealsService {
       updatedAt: deal.deal_updatedAt,
       companyName: deal.company_companyName,
       companyLogo: deal.company_logo,
-      originName: deal.deal_originName,
-      destinationName: deal.deal_destinationName,
+      originName: deal.deal_originDisplayName || deal.deal_originName,
+      destinationName: deal.deal_destinationDisplayName || deal.deal_destinationName,
       routeImageUrl: "", // Not available in current DB schema
       aircraftName: deal.aircraft_name,
       aircraftType: deal.aircraft_type,
@@ -186,11 +228,11 @@ export class CharterDealsService {
       aircraftImages: deal.aircraftImages ? deal.aircraftImages.split(',') : [],
       routeImages: [], // Not available in current DB schema
       // Dynamic fields
-      duration: await this.calculateDuration(deal.deal_originName, deal.deal_destinationName, deal.aircraft_type),
+      duration: await this.resolveDuration(deal.deal_estimatedFlightTimeMinutes, deal.deal_originName, deal.deal_destinationName, deal.aircraft_type),
       amenities: this.formatAmenities(amenitiesByAircraft.get(deal.deal_aircraftId) || []),
     })));
 
-    return { deals: transformedDeals, total };
+    return { deals: this.applyRemainingSeats(transformedDeals, bookedSeatsByDealId), total };
   }
 
   async findById(id: number): Promise<CharterDealWithRelations | null> {
@@ -210,12 +252,15 @@ export class CharterDealsService {
         'deal.pricePerSeat',
         'deal.discountPerSeat',
         'deal.availableSeats',
+        'deal.estimatedFlightTimeMinutes',
         'deal.createdAt',
         'deal.updatedAt',
         'company.companyName',
         'company.logo',
         'deal.originName as deal_originName',
+        'deal.originDisplayName as deal_originDisplayName',
         'deal.destinationName as deal_destinationName',
+        'deal.destinationDisplayName as deal_destinationDisplayName',
         'aircraft.name',
         'aircraft.type',
         'aircraft.capacity',
@@ -226,6 +271,8 @@ export class CharterDealsService {
 
     if (!deal) return null;
 
+    const bookedSeatsByDealId = await this.getBookedSeatsByDealId([deal.deal_id]);
+
     return {
       id: deal.deal_id,
       companyId: deal.deal_companyId,
@@ -234,13 +281,13 @@ export class CharterDealsService {
       time: deal.deal_time,
       pricePerSeat: deal.deal_pricePerSeat,
       discountPerSeat: deal.deal_discountPerSeat,
-      availableSeats: deal.deal_availableSeats,
+      availableSeats: Math.max(0, (deal.deal_availableSeats || 0) - (bookedSeatsByDealId.get(deal.deal_id) || 0)),
       createdAt: deal.deal_createdAt,
       updatedAt: deal.deal_updatedAt,
       companyName: deal.company_companyName,
       companyLogo: deal.company_logo,
-      originName: deal.deal_originName,
-      destinationName: deal.deal_destinationName,
+      originName: deal.deal_originDisplayName || deal.deal_originName,
+      destinationName: deal.deal_destinationDisplayName || deal.deal_destinationName,
       routeImageUrl: "", // Not available in current DB schema
       aircraftName: deal.aircraft_name,
       aircraftType: deal.aircraft_type,
@@ -249,7 +296,7 @@ export class CharterDealsService {
       aircraftImages: deal.aircraftImages ? deal.aircraftImages.split(',') : [],
       routeImages: [], // Not available in current DB schema
       // Placeholder fields
-      duration: await this.calculateDuration(deal.deal_originName, deal.deal_destinationName),
+      duration: await this.resolveDuration(deal.deal_estimatedFlightTimeMinutes, deal.deal_originName, deal.deal_destinationName, deal.aircraft_type),
       amenities: await this.getAircraftAmenities(deal.deal_aircraftId),
     };
   }
@@ -281,12 +328,15 @@ export class CharterDealsService {
         'deal.pricePerSeat',
         'deal.discountPerSeat',
         'deal.availableSeats',
+        'deal.estimatedFlightTimeMinutes',
         'deal.createdAt',
         'deal.updatedAt',
         'company.companyName',
         'company.logo',
         'deal.originName as deal_originName',
+        'deal.originDisplayName as deal_originDisplayName',
         'deal.destinationName as deal_destinationName',
+        'deal.destinationDisplayName as deal_destinationDisplayName',
         'aircraft.name',
         'aircraft.type',
         'aircraft.capacity',
@@ -302,6 +352,7 @@ export class CharterDealsService {
     const amenitiesByAircraft = await this.amenitiesService.getAircraftAmenitiesBatch(
       deals.map((deal) => deal.deal_aircraftId),
     );
+    const bookedSeatsByDealId = await this.getBookedSeatsByDealId(deals.map((deal) => deal.deal_id));
 
     const transformedDeals: CharterDealWithRelations[] = await Promise.all(deals.map(async (deal) => ({
       id: deal.deal_id,
@@ -316,8 +367,8 @@ export class CharterDealsService {
       updatedAt: deal.deal_updatedAt,
       companyName: deal.company_companyName,
       companyLogo: deal.company_logo,
-      originName: deal.deal_originName,
-      destinationName: deal.deal_destinationName,
+      originName: deal.deal_originDisplayName || deal.deal_originName,
+      destinationName: deal.deal_destinationDisplayName || deal.deal_destinationName,
       routeImageUrl: "", // Not available in current DB schema
       aircraftName: deal.aircraft_name,
       aircraftType: deal.aircraft_type,
@@ -326,11 +377,11 @@ export class CharterDealsService {
       aircraftImages: deal.aircraftImages ? deal.aircraftImages.split(',') : [],
       routeImages: [], // Not available in current DB schema
       // Placeholder fields
-      duration: await this.calculateDuration(deal.deal_originName, deal.deal_destinationName),
+      duration: await this.resolveDuration(deal.deal_estimatedFlightTimeMinutes, deal.deal_originName, deal.deal_destinationName, deal.aircraft_type),
       amenities: this.formatAmenities(amenitiesByAircraft.get(deal.deal_aircraftId) || []),
     })));
 
-    return { deals: transformedDeals, total };
+    return { deals: this.applyRemainingSeats(transformedDeals, bookedSeatsByDealId), total };
   }
 
   async findByRoute(
@@ -375,12 +426,15 @@ export class CharterDealsService {
         'deal.pricePerSeat',
         'deal.discountPerSeat',
         'deal.availableSeats',
+        'deal.estimatedFlightTimeMinutes',
         'deal.createdAt',
         'deal.updatedAt',
         'company.companyName',
         'company.logo',
         'deal.originName as deal_originName',
+        'deal.originDisplayName as deal_originDisplayName',
         'deal.destinationName as deal_destinationName',
+        'deal.destinationDisplayName as deal_destinationDisplayName',
         'aircraft.name',
         'aircraft.type',
         'aircraft.capacity',
@@ -396,6 +450,7 @@ export class CharterDealsService {
     const amenitiesByAircraft = await this.amenitiesService.getAircraftAmenitiesBatch(
       deals.map((deal) => deal.deal_aircraftId),
     );
+    const bookedSeatsByDealId = await this.getBookedSeatsByDealId(deals.map((deal) => deal.deal_id));
 
     const transformedDeals: CharterDealWithRelations[] = await Promise.all(deals.map(async (deal) => ({
       id: deal.deal_id,
@@ -410,8 +465,8 @@ export class CharterDealsService {
       updatedAt: deal.deal_updatedAt,
       companyName: deal.company_companyName,
       companyLogo: deal.company_logo,
-      originName: deal.deal_originName,
-      destinationName: deal.deal_destinationName,
+      originName: deal.deal_originDisplayName || deal.deal_originName,
+      destinationName: deal.deal_destinationDisplayName || deal.deal_destinationName,
       routeImageUrl: "", // Not available in current DB schema
       aircraftName: deal.aircraft_name,
       aircraftType: deal.aircraft_type,
@@ -420,11 +475,31 @@ export class CharterDealsService {
       aircraftImages: deal.aircraftImages ? deal.aircraftImages.split(',') : [],
       routeImages: [], // Not available in current DB schema
       // Placeholder fields
-      duration: await this.calculateDuration(deal.deal_originName, deal.deal_destinationName),
+      duration: await this.resolveDuration(deal.deal_estimatedFlightTimeMinutes, deal.deal_originName, deal.deal_destinationName, deal.aircraft_type),
       amenities: this.formatAmenities(amenitiesByAircraft.get(deal.deal_aircraftId) || []),
     })));
 
-    return { deals: transformedDeals, total };
+    return { deals: this.applyRemainingSeats(transformedDeals, bookedSeatsByDealId), total };
+  }
+
+  // Prefer the operator-entered estimatedFlightTimeMinutes on the deal itself;
+  // only fall back to the geocoded distance/speed estimate when it's unset (0).
+  private async resolveDuration(
+    estimatedFlightTimeMinutes: number | null | undefined,
+    origin: string,
+    destination: string,
+    aircraftType?: string,
+  ): Promise<string> {
+    if (estimatedFlightTimeMinutes && estimatedFlightTimeMinutes > 0) {
+      return this.formatMinutesDuration(estimatedFlightTimeMinutes);
+    }
+    return this.calculateDuration(origin, destination, aircraftType);
+  }
+
+  private formatMinutesDuration(totalMinutes: number): string {
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = Math.round(totalMinutes % 60);
+    return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
   }
 
   // Calculate duration based on route using Google Earth Engine
@@ -639,12 +714,15 @@ export class CharterDealsService {
         'deal.pricePerSeat',
         'deal.discountPerSeat',
         'deal.availableSeats',
+        'deal.estimatedFlightTimeMinutes',
         'deal.createdAt',
         'deal.updatedAt',
         'company.companyName',
         'company.logo',
         'deal.originName as deal_originName',
+        'deal.originDisplayName as deal_originDisplayName',
         'deal.destinationName as deal_destinationName',
+        'deal.destinationDisplayName as deal_destinationDisplayName',
         'aircraft.name',
         'aircraft.type',
         'aircraft.capacity',
@@ -667,6 +745,7 @@ export class CharterDealsService {
       const amenitiesByAircraft = await this.amenitiesService.getAircraftAmenitiesBatch(
         deals.map((deal) => deal.deal_aircraftId),
       );
+      const bookedSeatsByDealId = await this.getBookedSeatsByDealId(deals.map((deal) => deal.deal_id));
 
       const transformedDeals = await Promise.all(deals.map(async (deal) => ({
         id: deal.deal_id,
@@ -681,21 +760,21 @@ export class CharterDealsService {
         updatedAt: deal.deal_updatedAt,
         companyName: deal.company_companyName,
         companyLogo: deal.company_logo,
-        originName: deal.deal_originName,
-        destinationName: deal.deal_destinationName,
+        originName: deal.deal_originDisplayName || deal.deal_originName,
+        destinationName: deal.deal_destinationDisplayName || deal.deal_destinationName,
         routeImageUrl: "", // Not available in current DB schema
         aircraftName: deal.aircraft_name,
         aircraftType: deal.aircraft_type,
         aircraftCapacity: deal.aircraft_capacity,
         aircraftImages: deal.aircraftImages ? deal.aircraftImages.split(',') : [],
         routeImages: [], // Not available in current DB schema
-        duration: await this.calculateDuration(deal.deal_originName, deal.deal_destinationName, deal.aircraft_type),
+        duration: await this.resolveDuration(deal.deal_estimatedFlightTimeMinutes, deal.deal_originName, deal.deal_destinationName, deal.aircraft_type),
         amenities: this.formatAmenities(amenitiesByAircraft.get(deal.deal_aircraftId) || []),
       })));
 
       return {
         success: true,
-        data: transformedDeals as any,
+        data: this.applyRemainingSeats(transformedDeals, bookedSeatsByDealId) as any,
         total,
         page,
         limit,
@@ -716,6 +795,7 @@ export class CharterDealsService {
     const amenitiesByAircraft = await this.amenitiesService.getAircraftAmenitiesBatch(
       deals.map((deal) => deal.deal_aircraftId),
     );
+    const bookedSeatsByDealId = await this.getBookedSeatsByDealId(deals.map((deal) => deal.deal_id));
 
     const groupedMap = new Map<string, any[]>();
 
@@ -776,15 +856,15 @@ export class CharterDealsService {
         updatedAt: deal.deal_updatedAt,
         companyName: deal.company_companyName,
         companyLogo: deal.company_logo,
-        originName: deal.deal_originName,
-        destinationName: deal.deal_destinationName,
+        originName: deal.deal_originDisplayName || deal.deal_originName,
+        destinationName: deal.deal_destinationDisplayName || deal.deal_destinationName,
         routeImageUrl: "", // Not available in current DB schema
         aircraftName: deal.aircraft_name,
         aircraftType: deal.aircraft_type,
         aircraftCapacity: deal.aircraft_capacity,
         aircraftImages: deal.aircraftImages ? deal.aircraftImages.split(',') : [],
         routeImages: [], // Not available in current DB schema
-        duration: await this.calculateDuration(deal.deal_originName, deal.deal_destinationName, deal.aircraft_type),
+        duration: await this.resolveDuration(deal.deal_estimatedFlightTimeMinutes, deal.deal_originName, deal.deal_destinationName, deal.aircraft_type),
         amenities: this.formatAmenities(amenitiesByAircraft.get(deal.deal_aircraftId) || []),
       })));
 
@@ -797,7 +877,7 @@ export class CharterDealsService {
           destination: firstDeal.deal_destinationName || '',
           distanceFromUser,
         },
-        deals: transformedDeals as any[],
+        deals: this.applyRemainingSeats(transformedDeals, bookedSeatsByDealId) as any[],
       });
     }
 

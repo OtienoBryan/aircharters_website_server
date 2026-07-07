@@ -90,7 +90,10 @@ export class PaystackProvider implements PaymentProvider {
         reference: this.generateReference(request.bookingId),
         // CLIENT_APP_URL is the customer-facing booking SPA (charters_web/client),
         // distinct from FRONTEND_URL which points at the company/admin dashboard.
-        callback_url: `${process.env.CLIENT_APP_URL || 'http://localhost:5173'}/booking/verify?bookingId=${request.bookingId}`,
+        // Falls back to the real production domain (never localhost) so a missing
+        // env var in production can't send a paying customer's browser to
+        // http://localhost after checkout.
+        callback_url: `${process.env.CLIENT_APP_URL || 'https://www.aircharterss.com'}/booking/verify?bookingId=${request.bookingId}`,
         metadata: {
           bookingId: request.bookingId,
           companyId: request.metadata?.companyId,
