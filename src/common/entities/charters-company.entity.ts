@@ -68,6 +68,11 @@ export class ChartersCompany {
   @Column({ name: 'reviewRemarks', type: 'text', nullable: true })
   reviewRemarks: string;
 
+  // Fleet listing order: 1 = shown first, 2 = next, etc. 0 means "not set"
+  // and sorts after every company with an explicit priority.
+  @Column({ type: 'int', default: 0 })
+  priority: number;
+
   @CreateDateColumn({ name: 'createdAt' })
   createdAt: Date;
 

@@ -1,16 +1,44 @@
-import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
+import { Controller, Get, Param, ParseIntPipe, Query, Post, Body, UseGuards, Request } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ExperiencesService } from './experiences.service';
-import { 
-  ExperiencesResponseDto, 
+import {
+  ExperiencesResponseDto,
   ExperienceDetailResponseDto,
-  ExperienceCardDto 
+  ExperienceCardDto
 } from './dto/experience-response.dto';
+import { RequestExperienceQuoteDto } from './dto/request-experience-quote.dto';
 
 @ApiTags('Experiences')
 @Controller('experiences')
 export class ExperiencesController {
   constructor(private readonly experiencesService: ExperiencesService) {}
+
+  @Post('request-quote')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Request a quote for an experience without picking a scheduled slot (creates a pending booking, no payment)' })
+  @ApiResponse({ status: 201, description: 'Quote request created successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid request data' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async requestQuote(
+    @Body() dto: RequestExperienceQuoteDto,
+    @Request() req: any
+  ) {
+    try {
+      const result = await this.experiencesService.requestQuote(dto, req.user.id);
+      return {
+        success: true,
+        data: result,
+        message: 'Quote request submitted successfully',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message || 'Failed to submit quote request',
+      };
+    }
+  }
 
   @Get()
   @ApiOperation({ summary: 'Get all experiences grouped by category' })

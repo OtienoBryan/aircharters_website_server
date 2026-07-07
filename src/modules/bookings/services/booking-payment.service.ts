@@ -255,7 +255,9 @@ export class BookingPaymentService {
             await this.emailService.sendPaymentConfirmationToClient(fullBooking.user.email, {
               referenceNumber: fullBooking.referenceNumber,
               bookingType: typeLabel,
-              amount,
+              // Always the booking's stored USD price, never the raw payment
+              // amount (which may arrive in a locally-converted currency).
+              amount: Number(fullBooking.totalPrice) || amount,
               paymentMethod,
               transactionId: paymentTransactionId,
             });

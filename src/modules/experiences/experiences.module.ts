@@ -7,6 +7,8 @@ import { ExperienceTemplate } from '../../common/entities/experience-template.en
 import { ExperienceSchedule } from '../../common/entities/experience-schedule.entity';
 import { Aircraft } from '../../common/entities/aircraft.entity';
 import { AircraftImage } from '../../common/entities/aircraft-image.entity';
+import { Booking } from '../../common/entities/booking.entity';
+import { EmailModule } from '../email/email.module';
 
 @Module({
   imports: [
@@ -16,7 +18,9 @@ import { AircraftImage } from '../../common/entities/aircraft-image.entity';
       ExperienceSchedule,
       Aircraft,
       AircraftImage,
+      Booking,
     ]),
+    EmailModule,
   ],
   controllers: [ExperiencesController],
   providers: [ExperiencesService],

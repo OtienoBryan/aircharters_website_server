@@ -473,12 +473,19 @@ export class BookingsController {
       throw new BadRequestException(`Payment was not successful (status: ${payment.status})`);
     }
 
+    // Paystack settles in the local currency (e.g. KES) it was charged in, so
+    // payment.amount is a converted figure, not the original USD price. Record
+    // and confirm the booking's own quoted USD totalPrice instead - that's the
+    // amount the customer agreed to pay, unaffected by gateway FX conversion.
+    const existingBooking = await this.bookingsService.findOne(id);
+    const confirmedAmount = Number(existingBooking?.totalPrice) || payment.amount;
+
     // 2. Process booking payment
     const booking = await this.bookingsService.bookingPaymentService.processPayment(
       id,
       payment.transactionId,
       payment.paymentMethod,
-      payment.amount
+      confirmedAmount
     );
 
     return {

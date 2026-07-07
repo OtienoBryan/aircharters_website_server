@@ -65,6 +65,11 @@ export class Booking {
   @Column({ name: 'experienceTemplateId', type: 'int', nullable: true })
   experienceTemplateId: number;
 
+  // Set only when booked instantly against a pre-priced schedule slot; left
+  // null for a quote-request booking (no schedule picked yet).
+  @Column({ name: 'experienceScheduleId', type: 'int', nullable: true })
+  experienceScheduleId: number | null;
+
   @Column({ name: 'totalPrice', type: 'decimal', precision: 10, scale: 2, nullable: true })
   totalPrice: number;
 

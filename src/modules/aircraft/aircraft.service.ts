@@ -165,6 +165,7 @@ export class AircraftService {
         'aircraft.baseCity AS baseCity',
         'company.id AS companyId',
         'company.companyName AS companyName',
+        'company.priority AS companyPriority',
         'aircraftType.placeholderImageUrl AS placeholderImageUrl',
         'MIN(images.url) AS imageUrl',
         'GROUP_CONCAT(DISTINCT images.url) AS allImages',
@@ -172,7 +173,13 @@ export class AircraftService {
       .groupBy('aircraft.id')
       .addGroupBy('company.id')
       .addGroupBy('company.companyName')
+      .addGroupBy('company.priority')
       .addGroupBy('aircraftType.placeholderImageUrl')
+      // Priority starts at 1 (lower = shown first); 0 means "not set" and
+      // those companies fall to the end, after every explicitly prioritized one.
+      .orderBy('CASE WHEN company.priority = 0 THEN 1 ELSE 0 END', 'ASC')
+      .addOrderBy('company.priority', 'ASC')
+      .addOrderBy('aircraft.name', 'ASC')
       .getRawMany();
 
     return rows.map((row) => ({

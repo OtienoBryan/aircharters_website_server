@@ -1,12 +1,16 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { ExperienceTemplate } from '../../common/entities/experience-template.entity';
 import { ExperienceImage } from '../../common/entities/experience-image.entity';
 import { ExperienceSchedule } from '../../common/entities/experience-schedule.entity';
 import { Aircraft } from '../../common/entities/aircraft.entity';
 import { AircraftImage } from '../../common/entities/aircraft-image.entity';
+import { Booking, BookingType, BookingStatus, PaymentStatus } from '../../common/entities/booking.entity';
+import { User } from '../../common/entities/user.entity';
 import { ExperienceCardDto, ExperienceCategoryDto, ExperienceDetailDto, ExperienceScheduleDto } from './dto/experience-response.dto';
+import { RequestExperienceQuoteDto } from './dto/request-experience-quote.dto';
+import { EmailService } from '../email/email.service';
 
 @Injectable()
 export class ExperiencesService {
@@ -27,7 +31,131 @@ export class ExperiencesService {
     private readonly aircraftRepository: Repository<Aircraft>,
     @InjectRepository(AircraftImage)
     private readonly aircraftImageRepository: Repository<AircraftImage>,
+    @InjectRepository(Booking)
+    private readonly bookingRepository: Repository<Booking>,
+    private readonly dataSource: DataSource,
+    private readonly emailService: EmailService,
   ) {}
+
+  // Books interest in an experience without picking one of its scheduled
+  // slots - creates a pending booking (no price, no schedule) for the
+  // operator to quote, mirroring the direct-charter request-quote flow.
+  async requestQuote(dto: RequestExperienceQuoteDto, userId: string) {
+    const template = await this.experienceTemplateRepository
+      .createQueryBuilder('et')
+      .leftJoinAndSelect('et.company', 'c')
+      .where('et.id = :id', { id: dto.experienceTemplateId })
+      .andWhere('et.isActive = :isActive', { isActive: true })
+      .getOne();
+
+    if (!template) {
+      throw new NotFoundException(`Experience with ID ${dto.experienceTemplateId} not found`);
+    }
+    if (template.company?.status !== 'active') {
+      throw new BadRequestException('This experience is not currently accepting bookings.');
+    }
+
+    const referenceNumber = `AC${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+    const locationName = template.locationName || `${template.city || ''}, ${template.country || ''}`.trim();
+    const now = new Date();
+
+    // If the experience already has a set price, skip the "awaiting quote"
+    // step entirely - the booking is payable immediately via the standard
+    // /bookings/:id/create-payment-intent flow.
+    const hasSetPrice = Number(template.total) > 0;
+
+    const booking = this.bookingRepository.create({
+      userId,
+      companyId: template.companyId,
+      bookingType: BookingType.EXPERIENCE,
+      experienceTemplateId: template.id,
+      experienceScheduleId: null,
+      dealId: null,
+      totalPrice: hasSetPrice ? Number(template.total) : null,
+      bookingStatus: hasSetPrice ? BookingStatus.PRICED : BookingStatus.PENDING,
+      paymentStatus: PaymentStatus.PENDING,
+      referenceNumber,
+      specialRequirements: dto.specialRequests || null,
+      originName: locationName,
+      destinationName: locationName,
+      departureDateTime: new Date(dto.preferredDateTime),
+      totalAdults: dto.passengerCount,
+      totalChildren: 0,
+      onboardDining: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const savedArr = await this.bookingRepository.save(booking);
+    const savedBooking = Array.isArray(savedArr) ? savedArr[0] : savedArr;
+
+    // Only a still-pending quote request needs the "please post a price"
+    // notifications - a priced booking goes straight to payment, and the
+    // existing payment-confirmation emails cover that once it's paid.
+    if (!hasSetPrice) {
+      try {
+        const user = await this.dataSource.manager.findOne(User, {
+          where: { id: userId },
+          select: ['id', 'first_name', 'last_name', 'email'],
+        });
+        if (user) {
+          await this.sendQuoteRequestNotifications(savedBooking, template, user, dto);
+        }
+      } catch (notificationError) {
+        console.error('Failed to send experience quote request notifications:', notificationError);
+      }
+    }
+
+    return {
+      booking: {
+        id: savedBooking.id,
+        referenceNumber,
+        bookingStatus: savedBooking.bookingStatus,
+        paymentStatus: savedBooking.paymentStatus,
+        totalPrice: savedBooking.totalPrice,
+      },
+      message: hasSetPrice
+        ? 'Booking created. Continue to payment to confirm your spot.'
+        : 'Quote request submitted. Our team will review your request and send a price shortly.',
+    };
+  }
+
+  private async sendQuoteRequestNotifications(
+    booking: Booking,
+    template: ExperienceTemplate,
+    user: User,
+    dto: RequestExperienceQuoteDto,
+  ): Promise<void> {
+    const clientName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Traveler';
+    const departureLabel = booking.departureDateTime ? new Date(booking.departureDateTime).toLocaleString() : 'TBA';
+    const locationName = booking.originName || template.locationName || template.city;
+
+    if (user.email) {
+      await this.emailService.sendQuoteRequestConfirmationToClient(user.email, {
+        referenceNumber: booking.referenceNumber,
+        bookingType: 'Experience',
+        clientName,
+        originName: locationName,
+        destinationName: locationName,
+        departureDateTime: departureLabel,
+        aircraftName: template.title,
+      });
+    }
+
+    if (template.company?.email) {
+      await this.emailService.sendQuoteRequestNotificationToOperator(template.company.email, {
+        referenceNumber: booking.referenceNumber,
+        bookingType: 'Experience',
+        clientName,
+        originName: locationName,
+        destinationName: locationName,
+        departureDateTime: departureLabel,
+        passengerCount: dto.passengerCount,
+        aircraftName: template.title,
+        specialRequests: dto.specialRequests,
+      });
+    }
+  }
 
   // Schedules only carry an aircraftId; look up each aircraft's name and
   // first image in one batched query instead of one query per schedule.
@@ -110,7 +238,12 @@ export class ExperiencesService {
         .leftJoinAndSelect('et.images', 'ei')
         .leftJoinAndSelect('et.company', 'c')
         .where('et.isActive = :isActive', { isActive: true })
-        .orderBy('et.createdAt', 'DESC')
+        .andWhere('c.status = :companyStatus', { companyStatus: 'active' })
+        // Priority starts at 1 (lower = shown first); 0 means "not set" and
+        // those companies fall to the end, same convention as the fleet listing.
+        .orderBy('CASE WHEN c.priority = 0 THEN 1 ELSE 0 END', 'ASC')
+        .addOrderBy('c.priority', 'ASC')
+        .addOrderBy('et.createdAt', 'DESC')
         .getMany(),
       this.getNextSchedulesByExperienceId(),
       this.getScheduledCountsByExperienceId(),
