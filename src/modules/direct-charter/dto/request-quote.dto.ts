@@ -1,6 +1,7 @@
-import { IsString, IsNotEmpty, IsDateString, IsInt, Min, Max, IsOptional, IsArray, ValidateNested, IsNumber, IsLatitude, IsLongitude } from 'class-validator';
+import { IsString, IsNotEmpty, IsDateString, IsInt, Min, Max, IsOptional, IsArray, ValidateNested, IsNumber, IsLatitude, IsLongitude, IsEnum } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { TripType } from '../../../common/entities/booking.entity';
 
 /**
  * A waypoint on a quote request. Only the name (and optional order) is
@@ -77,6 +78,16 @@ export class RequestQuoteDto {
   @IsDateString()
   @IsNotEmpty()
   departureDateTime: string;
+
+  @ApiProperty({ description: 'Trip type', enum: TripType, default: TripType.ONE_WAY, required: false })
+  @IsOptional()
+  @IsEnum(TripType)
+  tripType?: TripType;
+
+  @ApiProperty({ description: 'Return date and time (ISO string) - required when tripType is round_trip', required: false })
+  @IsOptional()
+  @IsDateString()
+  returnDateTime?: string;
 
   @ApiProperty({ description: 'Number of passengers' })
   @IsInt()

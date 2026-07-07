@@ -77,14 +77,18 @@ export class AuthService {
         type: 'backend', // Indicate this is a backend token
       };
 
-      const accessToken = this.jwtService.sign(payload, { expiresIn: '1h' });
-      const refreshToken = this.jwtService.sign(payload, { expiresIn: '7d' });
+      // The client only stores/uses the access token today (no refresh-token
+      // flow wired up), so it needs a long lifetime on its own to avoid
+      // logging users out every hour. Refresh token still issued for when
+      // that flow is added.
+      const accessToken = this.jwtService.sign(payload, { expiresIn: '30d' });
+      const refreshToken = this.jwtService.sign(payload, { expiresIn: '90d' });
 
       return {
         accessToken,
         refreshToken,
         tokenType: 'Bearer',
-        expiresIn: 3600,
+        expiresIn: 2592000, // 30 days, in seconds
         user: {
           id: savedUser.id,
           email: savedUser.email,
@@ -142,14 +146,18 @@ export class AuthService {
         type: 'backend',
       };
 
-      const accessToken = this.jwtService.sign(payload, { expiresIn: '1h' });
-      const refreshToken = this.jwtService.sign(payload, { expiresIn: '7d' });
+      // The client only stores/uses the access token today (no refresh-token
+      // flow wired up), so it needs a long lifetime on its own to avoid
+      // logging users out every hour. Refresh token still issued for when
+      // that flow is added.
+      const accessToken = this.jwtService.sign(payload, { expiresIn: '30d' });
+      const refreshToken = this.jwtService.sign(payload, { expiresIn: '90d' });
 
       return {
         accessToken,
         refreshToken,
         tokenType: 'Bearer',
-        expiresIn: 3600,
+        expiresIn: 2592000, // 30 days, in seconds
         user: {
           id: user.id,
           email: user.email,
@@ -207,14 +215,18 @@ export class AuthService {
         type: 'backend',
       };
 
-      const accessToken = this.jwtService.sign(payload, { expiresIn: '1h' });
-      const refreshToken = this.jwtService.sign(payload, { expiresIn: '7d' });
+      // The client only stores/uses the access token today (no refresh-token
+      // flow wired up), so it needs a long lifetime on its own to avoid
+      // logging users out every hour. Refresh token still issued for when
+      // that flow is added.
+      const accessToken = this.jwtService.sign(payload, { expiresIn: '30d' });
+      const refreshToken = this.jwtService.sign(payload, { expiresIn: '90d' });
 
       return {
         accessToken,
         refreshToken,
         tokenType: 'Bearer',
-        expiresIn: 3600,
+        expiresIn: 2592000, // 30 days, in seconds
         user: {
           id: user.id,
           email: user.email,
@@ -250,14 +262,14 @@ export class AuthService {
         phone: payload.phone,
       };
 
-      const accessToken = this.jwtService.sign(newPayload);
-      const newRefreshToken = this.jwtService.sign(newPayload, { expiresIn: '7d' });
+      const accessToken = this.jwtService.sign(newPayload, { expiresIn: '30d' });
+      const newRefreshToken = this.jwtService.sign(newPayload, { expiresIn: '90d' });
 
       return {
         accessToken,
         refreshToken: newRefreshToken,
         tokenType: 'Bearer',
-        expiresIn: 3600,
+        expiresIn: 2592000, // 30 days, in seconds
       };
     } catch (error) {
       throw new UnauthorizedException('Invalid refresh token');

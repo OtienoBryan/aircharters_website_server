@@ -38,6 +38,11 @@ export enum BookingType {
   CARGO = 'cargo',
 }
 
+export enum TripType {
+  ONE_WAY = 'one_way',
+  ROUND_TRIP = 'round_trip',
+}
+
 @Entity('charter_bookings')
 export class Booking {
   @PrimaryGeneratedColumn()
@@ -52,12 +57,20 @@ export class Booking {
   @Column({ name: 'aircraftId', type: 'int', nullable: true })
   aircraftId: number;
 
-  @Column({ 
-    name: 'bookingType', 
-    type: 'enum', 
-    enum: BookingType 
+  @Column({
+    name: 'bookingType',
+    type: 'enum',
+    enum: BookingType
   })
   bookingType: BookingType;
+
+  @Column({
+    name: 'tripType',
+    type: 'enum',
+    enum: TripType,
+    default: TripType.ONE_WAY,
+  })
+  tripType: TripType;
 
   @Column({ name: 'dealId', type: 'int', nullable: true })
   dealId: number;
@@ -127,6 +140,10 @@ export class Booking {
 
   @Column({ name: 'departureDateTime', type: 'datetime', nullable: true })
   departureDateTime: Date;
+
+  // Only set for round-trip bookings.
+  @Column({ name: 'returnDateTime', type: 'datetime', nullable: true })
+  returnDateTime: Date | null;
 
   @Column({ name: 'estimatedFlightHours', type: 'decimal', precision: 5, scale: 2, nullable: true })
   estimatedFlightHours: number;

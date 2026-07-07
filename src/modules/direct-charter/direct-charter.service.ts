@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, In, DataSource, DeepPartial } from 'typeorm';
 import { Aircraft } from '../../common/entities/aircraft.entity';
 import { AircraftCalendar, CalendarEventType } from '../../common/entities/aircraft-calendar.entity';
-import { Booking, BookingType, BookingStatus, PaymentStatus } from '../../common/entities/booking.entity';
+import { Booking, BookingType, BookingStatus, PaymentStatus, TripType } from '../../common/entities/booking.entity';
 import { ChartersCompany } from '../../common/entities/charters-company.entity';
 import { Passenger } from '../../common/entities/passenger.entity';
 import { BookingStop, LocationType } from '../../common/entities/booking-stop.entity';
@@ -663,6 +663,16 @@ export class DirectCharterService {
    */
   async requestQuote(dto: RequestQuoteDto, userId: string) {
     const { aircraftId, origin, destination, departureDateTime, passengerCount } = dto;
+    const tripType = dto.tripType || TripType.ONE_WAY;
+
+    if (tripType === TripType.ROUND_TRIP) {
+      if (!dto.returnDateTime) {
+        throw new BadRequestException('Return date and time is required for a round trip.');
+      }
+      if (new Date(dto.returnDateTime) <= new Date(departureDateTime)) {
+        throw new BadRequestException('Return date must be after the departure date.');
+      }
+    }
 
     // Resolve the aircraft to attach the operating company.
     const aircraft = await this.aircraftRepository.findOne({
@@ -721,6 +731,7 @@ export class DirectCharterService {
       companyId: aircraft.company?.id || 1,
       aircraftId,
       bookingType: resolveBookingType(aircraft.serviceType),
+      tripType,
       // Price is unknown until the operator quotes it — leave it unset.
       bookingStatus: BookingStatus.PENDING, // waiting for quote
       paymentStatus: PaymentStatus.PENDING,
@@ -729,6 +740,7 @@ export class DirectCharterService {
       originName: origin,
       destinationName: destination,
       departureDateTime: new Date(departureDateTime),
+      returnDateTime: tripType === TripType.ROUND_TRIP ? new Date(dto.returnDateTime) : null,
       estimatedFlightHours: estimatedFlightHours ?? null,
       estimatedArrivalTime: estimatedArrivalTime ?? null,
       originLatitude: originCoords?.lat ?? null,
