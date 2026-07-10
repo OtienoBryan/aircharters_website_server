@@ -167,9 +167,17 @@ export class AircraftService {
         'company.companyName AS companyName',
         'company.priority AS companyPriority',
         'aircraftType.placeholderImageUrl AS placeholderImageUrl',
-        'MIN(images.url) AS imageUrl',
+        // Prefer the aircraft's exterior shot as the card thumbnail; fall back to
+        // whatever image exists if it has no exterior photo yet.
+        `COALESCE(
+          (SELECT ai.url FROM aircraft_images ai
+            WHERE ai.aircraftId = aircraft.id AND ai.category = :imageCategory
+            ORDER BY ai.createdAt ASC LIMIT 1),
+          MIN(images.url)
+        ) AS imageUrl`,
         'GROUP_CONCAT(DISTINCT images.url) AS allImages',
       ])
+      .setParameter('imageCategory', 'exterior')
       .groupBy('aircraft.id')
       .addGroupBy('company.id')
       .addGroupBy('company.companyName')
